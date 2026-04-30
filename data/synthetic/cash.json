@@ -1,0 +1,30 @@
+{
+  "as_of": "2026-04-28",
+  "base_currency": "USD",
+  "balances": [
+    {
+      "account_id": "main_brokerage",
+      "currency": "USD",
+      "amount": 78420.55,
+      "type": "settled_cash"
+    },
+    {
+      "account_id": "main_brokerage",
+      "currency": "USD",
+      "amount": 12000.00,
+      "type": "money_market_sweep",
+      "yield_pct": 0.0485
+    },
+    {
+      "account_id": "fx_sub",
+      "currency": "EUR",
+      "amount": 8200.00,
+      "type": "settled_cash"
+    }
+  ],
+  "total_usd_equivalent": 99348.30,
+  "fx_rates_used": {
+    "EUR_USD": 1.0888
+  },
+  "notes": "Cash drag elevated; redeploy ~$50k toward AI Infrastructure bucket per latest committee minutes."
+}

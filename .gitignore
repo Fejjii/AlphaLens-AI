@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+!.env.local.example
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.coverage
+coverage/
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# uv
+.uv/
+
+# Node / Next.js
+node_modules/
+.next/
+.eslintcache
+out/
+.turbo/
+.pnpm-store/
+*.tsbuildinfo
+next-env.d.ts
+
+# Frontend env
+frontend/.env
+frontend/.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes (host-mounted)
+data/postgres/
+data/qdrant/
+
+# Logs
+*.log
+logs/
+.cursor/

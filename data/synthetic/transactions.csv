@@ -1,0 +1,21 @@
+trade_id,trade_date,symbol,side,quantity,price,fees,strategy_bucket,notes
+tx_0001,2025-01-14,NVDA,buy,150,480.00,1.50,AI Infrastructure,Initial position post Q4 earnings
+tx_0002,2025-02-03,MSFT,buy,300,360.00,2.00,AI Infrastructure,Add on AI capex re-rating
+tx_0003,2025-02-21,AAPL,buy,800,178.00,3.00,Quality Compounders,Build core position
+tx_0004,2025-03-12,TSM,buy,400,92.50,1.20,AI Infrastructure,Foundry exposure for AI cycle
+tx_0005,2025-04-08,AVGO,buy,120,950.00,1.80,AI Infrastructure,Custom silicon thesis
+tx_0006,2025-05-19,XOM,buy,500,112.00,2.00,Defensive,Energy ballast
+tx_0007,2025-06-04,GOOGL,buy,300,155.00,1.40,Quality Compounders,Search + cloud
+tx_0008,2025-07-22,NVDA,buy,100,640.00,0.80,AI Infrastructure,Add into pullback
+tx_0009,2025-08-15,META,buy,200,485.00,1.20,Quality Compounders,Reels monetization inflection
+tx_0010,2025-09-10,AMZN,buy,350,170.00,1.60,Quality Compounders,AWS reaccel
+tx_0011,2025-10-02,JPM,buy,400,180.00,1.80,Defensive,Net interest income tailwind
+tx_0012,2025-10-18,CRM,buy,300,235.00,1.50,Quality Compounders,Agentforce monetization
+tx_0013,2025-11-05,ASML,buy,90,780.00,1.00,AI Infrastructure,EUV monopoly
+tx_0014,2025-11-21,NEE,buy,700,75.00,2.10,Defensive,Renewables yield + growth
+tx_0015,2025-12-09,CVX,buy,500,155.00,2.00,Defensive,Buyback + dividend
+tx_0016,2026-01-13,MSFT,buy,300,395.00,2.00,AI Infrastructure,Top up post Build conf
+tx_0017,2026-02-04,BRKB,buy,250,402.00,1.50,Quality Compounders,Cash redeployment + insurance
+tx_0018,2026-03-17,AAPL,buy,400,182.00,2.00,Quality Compounders,Add on Vision Pro update
+tx_0019,2026-04-02,XOM,buy,300,118.00,1.20,Defensive,Oil tactical adds
+tx_0020,2026-04-21,NVDA,sell,50,820.00,0.50,AI Infrastructure,Trim on concentration

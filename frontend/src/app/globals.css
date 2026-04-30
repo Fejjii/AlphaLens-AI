@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 223 25% 7%;
+    --foreground: 210 20% 96%;
+
+    --card: 222 22% 10%;
+    --card-foreground: 210 20% 96%;
+
+    --muted: 222 17% 15%;
+    --muted-foreground: 215 12% 67%;
+
+    --border: 220 18% 18%;
+    --input: 220 18% 18%;
+    --ring: 214 95% 64%;
+
+    --primary: 213 92% 64%;
+    --primary-foreground: 222 25% 7%;
+
+    --accent: 220 18% 17%;
+    --accent-foreground: 210 20% 96%;
+
+    --success: 152 73% 42%;
+    --danger: 357 82% 61%;
+    --warning: 38 96% 58%;
+
+    --radius: 0.875rem;
+
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    background-image:
+      radial-gradient(circle at top, hsl(214 92% 64% / 0.08), transparent 28%),
+      linear-gradient(180deg, hsl(223 25% 8%) 0%, hsl(223 25% 7%) 50%, hsl(223 25% 6%) 100%);
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    @apply bg-primary/30 text-foreground;
+  }
+}
+
+@layer components {
+  .app-panel {
+    @apply rounded-[1rem] border border-border/80 bg-card/85 shadow-[0_10px_30px_rgba(0,0,0,0.16)];
+  }
+
+  .section-label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground;
+  }
+
+  .table-shell {
+    @apply overflow-hidden rounded-[1rem] border border-border/80 bg-card/75;
+  }
+
+  .table-base {
+    @apply w-full text-sm;
+  }
+
+  .table-head-row {
+    @apply border-b border-border/80 text-left text-[11px] uppercase tracking-[0.18em] text-muted-foreground;
+  }
+
+  .table-head-cell {
+    @apply px-5 py-3 font-medium;
+  }
+
+  .table-row {
+    @apply border-b border-border/70 transition-colors hover:bg-muted/20 last:border-0;
+  }
+
+  .table-cell {
+    @apply px-5 py-3;
+  }
+}

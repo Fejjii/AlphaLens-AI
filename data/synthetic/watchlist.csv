@@ -1,0 +1,11 @@
+symbol,name,sector,strategy_bucket,thesis_summary,target_entry_price,priority
+AMD,Advanced Micro Devices,Semiconductors,AI Infrastructure,Second-source GPU + datacenter share gains,140.00,high
+ARM,Arm Holdings,Semiconductors,AI Infrastructure,IP royalties on edge AI inference,95.00,medium
+PLTR,Palantir Technologies,Software,AI Infrastructure,AIP commercial uptake; long sales cycles,18.00,low
+SHOP,Shopify Inc,Software,Quality Compounders,Margin expansion post logistics divestiture,68.00,medium
+NOW,ServiceNow,Software,Quality Compounders,Workflow automation + GenAI cross-sell,720.00,medium
+LIN,Linde plc,Industrials,Defensive,Industrial gases pricing power,420.00,medium
+COST,Costco Wholesale,Consumer Staples,Defensive,Membership growth + fee hike optionality,820.00,low
+SLB,Schlumberger,Energy,Defensive,Offshore + international capex cycle,42.00,medium
+UNH,UnitedHealth Group,Healthcare,Defensive,Optum integration; MLR normalization,520.00,low
+NET,Cloudflare,Software,AI Infrastructure,Workers AI inference at edge,72.00,medium
