@@ -9,7 +9,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from alphalens.api import deps
-from alphalens.api.routers import agent, approvals, feedback, health, memory, portfolio, rag, reports, scenarios, speech, usage
+from alphalens.api.rate_limit import build_rate_limiter
+from alphalens.api.middleware import SecurityHeadersMiddleware
+from alphalens.api.routers import agent, approvals, auth, feedback, health, memory, plans, portfolio, rag, reports, scenarios, speech, usage
 from alphalens.core.config import Settings, get_settings
 from alphalens.core.errors import register_exception_handlers
 from alphalens.core.logging import configure_logging, get_logger
@@ -24,10 +26,20 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     log = get_logger("alphalens.api")
     log.info("api_startup", env=settings.app_env, version=settings.app_version)
     if settings.persistence_backend == "postgres" and settings.app_database_url:
-        engine = create_engine_from_settings(settings)
-        Base.metadata.create_all(bind=engine)
-        deps._approval_repository.cache_clear()
-        deps._approvals_service.cache_clear()
+        try:
+            engine = create_engine_from_settings(settings)
+            Base.metadata.create_all(bind=engine)
+            deps._approval_repository.cache_clear()
+            deps._approvals_service.cache_clear()
+            deps._feedback_repository.cache_clear()
+            deps._report_repository.cache_clear()
+            deps._scenario_repository.cache_clear()
+            deps._usage_service.cache_clear()
+            deps._memory_service.cache_clear()
+        except Exception:
+            if settings.app_env not in {"dev", "test"}:
+                raise
+            log.warning("persistence_startup_fallback", backend="in_memory")
     try:
         yield
     finally:
@@ -43,8 +55,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title=settings.app_name,
         version=settings.app_version,
         lifespan=_lifespan,
+        docs_url="/docs" if settings.docs_public_enabled else None,
+        redoc_url="/redoc" if settings.docs_public_enabled else None,
+        openapi_url="/openapi.json" if settings.docs_public_enabled else None,
     )
     app.state.settings = settings
+    app.state.rate_limiter = build_rate_limiter(settings)
 
     app.add_middleware(
         CORSMiddleware,
@@ -53,10 +69,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(SecurityHeadersMiddleware)
 
     register_exception_handlers(app)
 
     app.include_router(health.router)
+    app.include_router(auth.router)
+    app.include_router(plans.router)
     app.include_router(portfolio.router)
     app.include_router(approvals.router)
     app.include_router(agent.router)

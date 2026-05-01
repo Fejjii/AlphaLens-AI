@@ -14,6 +14,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from alphalens.repositories.usage import InMemoryUsageRepository, UsageRepository
 from alphalens.schemas.usage import EventType, UsageEvent, UsageSummary
 
 # ---------------------------------------------------------------------------
@@ -46,8 +47,8 @@ class UsageService:
     sufficient for the current single-process deployment.
     """
 
-    def __init__(self) -> None:
-        self._events: list[UsageEvent] = []
+    def __init__(self, repository: UsageRepository | None = None) -> None:
+        self._repository = repository or InMemoryUsageRepository()
 
     # ------------------------------------------------------------------
     # Recording
@@ -58,6 +59,7 @@ class UsageService:
         *,
         event_type: EventType = "llm_call",
         provider: str,
+        user_id: str | None = None,
         model: str | None = None,
         input_tokens: int = 0,
         output_tokens: int = 0,
@@ -69,6 +71,7 @@ class UsageService:
         event = UsageEvent(
             usage_id=f"use_{uuid.uuid4().hex[:12]}",
             created_at=datetime.now(tz=UTC),
+            user_id=user_id,
             conversation_id=conversation_id,
             event_type=event_type,
             provider=provider,
@@ -79,8 +82,7 @@ class UsageService:
             estimated_cost_usd=cost,
             metadata=metadata or {},
         )
-        self._events.append(event)
-        return event
+        return self._repository.create(event)
 
     def record_tool_usage(
         self,
@@ -88,54 +90,57 @@ class UsageService:
         tool_name: str,
         success: bool,
         provider: str | None = None,
+        user_id: str | None = None,
         conversation_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> UsageEvent:
         event = UsageEvent(
             usage_id=f"use_{uuid.uuid4().hex[:12]}",
             created_at=datetime.now(tz=UTC),
+            user_id=user_id,
             conversation_id=conversation_id,
             event_type="tool_call" if success else "tool_error",
             provider=provider or "unknown",
             tool_name=tool_name,
             metadata=metadata or {},
         )
-        self._events.append(event)
-        return event
+        return self._repository.create(event)
 
     def record_event(
         self,
         *,
         event_type: EventType,
         provider: str,
+        user_id: str | None = None,
         conversation_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> UsageEvent:
         event = UsageEvent(
             usage_id=f"use_{uuid.uuid4().hex[:12]}",
             created_at=datetime.now(tz=UTC),
+            user_id=user_id,
             conversation_id=conversation_id,
             event_type=event_type,
             provider=provider,
             metadata=metadata or {},
         )
-        self._events.append(event)
-        return event
+        return self._repository.create(event)
 
     # ------------------------------------------------------------------
     # Querying
     # ------------------------------------------------------------------
 
-    def list_usage_events(self) -> list[UsageEvent]:
-        return list(self._events)
+    def list_usage_events(self, *, user_id: str | None = None) -> list[UsageEvent]:
+        return self._repository.list(user_id=user_id)
 
-    def get_usage_summary(self) -> UsageSummary:
+    def get_usage_summary(self, *, user_id: str | None = None) -> UsageSummary:
         total_tokens = 0
         total_cost = 0.0
         tool_calls = 0
         llm_calls = 0
+        events = self.list_usage_events(user_id=user_id)
 
-        for ev in self._events:
+        for ev in events:
             total_tokens += ev.total_tokens or 0
             total_cost += ev.estimated_cost_usd or 0.0
             if ev.event_type in {"llm_call", "llm_fallback", "llm_error"}:
@@ -144,7 +149,7 @@ class UsageService:
                 tool_calls += 1
 
         return UsageSummary(
-            total_events=len(self._events),
+            total_events=len(events),
             total_tokens=total_tokens,
             estimated_cost_usd=round(total_cost, 8),
             tool_calls=tool_calls,
@@ -153,4 +158,6 @@ class UsageService:
 
     def reset(self) -> None:
         """Clear all events. Useful for test isolation."""
-        self._events.clear()
+        clear = getattr(self._repository, "clear", None)
+        if callable(clear):
+            clear()

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { AUTH_COOKIE_NAME } from "@/lib/auth";
+
 const BACKEND_BASE_URL = process.env.BACKEND_INTERNAL_URL ?? "http://localhost:8000";
 
 function buildTargetUrl(request: NextRequest, path: string[]): string {
@@ -16,6 +18,12 @@ async function proxy(request: NextRequest, path: string[]): Promise<Response> {
   const headers = new Headers(request.headers);
   headers.delete("host");
   headers.delete("content-length");
+  if (!headers.has("authorization")) {
+    const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+    if (token) {
+      headers.set("authorization", `Bearer ${token}`);
+    }
+  }
 
   const response = await fetch(targetUrl, {
     method: request.method,

@@ -281,6 +281,21 @@ export default function ScenariosPage() {
                       ))}
                     </ul>
                   </div>
+                  {scenario.disclaimer && (
+                    <div className="rounded-[0.875rem] border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100">
+                      {scenario.disclaimer}
+                    </div>
+                  )}
+                  {scenario.limitations && scenario.limitations.length > 0 && (
+                    <div className="rounded-[0.875rem] border border-border/60 bg-card/60 p-3 text-xs text-muted-foreground">
+                      {scenario.limitations.join(" · ")}
+                    </div>
+                  )}
+                  {scenario.approval_required_reason && (
+                    <div className="text-xs text-muted-foreground">
+                      Approval reason: {scenario.approval_required_reason}
+                    </div>
+                  )}
 
                   <div className="rounded-[0.875rem] border border-border/60 bg-card/60 p-3">
                     <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">

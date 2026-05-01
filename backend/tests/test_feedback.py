@@ -15,7 +15,8 @@ def test_feedback_service_summarizes_records() -> None:
             response_id="msg_1",
             rating=FeedbackRating.THUMBS_UP,
             category=FeedbackCategory.USEFULNESS,
-        )
+        ),
+        user_id="usr_feedback_test",
     )
     service.create_feedback(
         FeedbackCreate(
@@ -23,10 +24,11 @@ def test_feedback_service_summarizes_records() -> None:
             response_id="msg_2",
             rating=FeedbackRating.THUMBS_DOWN,
             category=FeedbackCategory.ACCURACY,
-        )
+        ),
+        user_id="usr_feedback_test",
     )
 
-    summary = service.summarize_feedback()
+    summary = service.summarize_feedback(user_id="usr_feedback_test")
 
     assert summary.total_feedback == 2
     assert summary.thumbs_up == 1
@@ -34,7 +36,7 @@ def test_feedback_service_summarizes_records() -> None:
     assert summary.by_category == {"accuracy": 1, "usefulness": 1}
 
 
-async def test_feedback_api_roundtrip(client: AsyncClient) -> None:
+async def test_feedback_api_roundtrip(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     response = await client.post(
         "/feedback",
         json={
@@ -44,6 +46,7 @@ async def test_feedback_api_roundtrip(client: AsyncClient) -> None:
             "comment": "Helpful",
             "category": "clarity",
         },
+        headers=auth_headers,
     )
     assert response.status_code == 200
     body = response.json()
@@ -51,11 +54,11 @@ async def test_feedback_api_roundtrip(client: AsyncClient) -> None:
     assert body["rating"] == "thumbs_up"
     assert body["category"] == "clarity"
 
-    list_response = await client.get("/feedback")
+    list_response = await client.get("/feedback", headers=auth_headers)
     assert list_response.status_code == 200
     assert len(list_response.json()) == 1
 
-    summary_response = await client.get("/feedback/summary")
+    summary_response = await client.get("/feedback/summary", headers=auth_headers)
     assert summary_response.status_code == 200
     summary = summary_response.json()
     assert summary["total_feedback"] == 1
@@ -76,7 +79,8 @@ async def test_feedback_service_records_usage_event() -> None:
             conversation_id="conv_2",
             response_id="msg_2",
             rating=FeedbackRating.THUMBS_DOWN,
-        )
+        ),
+        user_id="usr_feedback_usage",
     )
 
     events = usage.list_usage_events()

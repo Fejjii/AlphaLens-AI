@@ -34,6 +34,7 @@ class FeedbackCreate(APIModel):
 
 class FeedbackRecord(APIModel):
     id: str
+    user_id: str
     conversation_id: str
     message_id: str | None = None
     response_id: str | None = None

@@ -392,6 +392,25 @@ function DecisionCard({
         <MiniStat label="Evidence" value={String(decision.evidence.length)} />
         <MiniStat label="Confidence" value={`${(decision.confidence * 100).toFixed(0)}%`} />
       </div>
+      {decision.disclaimer && (
+        <div className="mt-3 rounded-[0.75rem] border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100">
+          {decision.disclaimer}
+        </div>
+      )}
+      {decision.approval_required_reason && (
+        <div className="mt-2 text-xs text-muted-foreground">
+          Approval reason: {decision.approval_required_reason}
+        </div>
+      )}
+      {decision.policy_flags && decision.policy_flags.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {decision.policy_flags.map((flag) => (
+            <Badge key={flag} variant="outline" className="capitalize">
+              {flag.replaceAll("_", " ")}
+            </Badge>
+          ))}
+        </div>
+      )}
 
       {decision.intent && (
         <div className="mt-3 rounded-[0.875rem] border border-border/60 bg-card/60 px-3 py-3 text-xs">

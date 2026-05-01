@@ -24,9 +24,15 @@ class ApprovalsService:
     def __init__(self, repository: ApprovalRepository | None = None) -> None:
         self._repository = repository or InMemoryApprovalRepository()
 
-    def create_approval_from_decision(self, decision: AgentDecision) -> ApprovalRecord:
+    def create_approval_from_decision(
+        self,
+        decision: AgentDecision,
+        *,
+        user_id: str,
+    ) -> ApprovalRecord:
         record = ApprovalRecord(
             approval_id=f"apv_{uuid.uuid4().hex[:12]}",
+            user_id=user_id,
             action_type=_approval_action_type(decision.recommendation),
             asset=_extract_asset(decision.evidence),
             recommendation=decision.recommendation,
@@ -38,17 +44,24 @@ class ApprovalsService:
         return self._repository.create(record)
 
     def list_approvals(
-        self, status: ApprovalStatus | None = None
+        self,
+        *,
+        user_id: str,
+        status: ApprovalStatus | None = None,
     ) -> list[ApprovalRecord]:
-        return self._repository.list(status=status)
+        return self._repository.list(user_id=user_id, status=status)
 
-    def get_approval(self, approval_id: str) -> ApprovalRecord | None:
-        return self._repository.get(approval_id)
+    def get_approval(self, approval_id: str, *, user_id: str) -> ApprovalRecord | None:
+        return self._repository.get(approval_id, user_id=user_id)
 
     def decide_approval(
-        self, approval_id: str, decision: ApprovalDecision
+        self,
+        approval_id: str,
+        decision: ApprovalDecision,
+        *,
+        user_id: str,
     ) -> ApprovalRecord | None:
-        record = self._repository.get(approval_id)
+        record = self._repository.get(approval_id, user_id=user_id)
         if record is None:
             return None
         updated = record.model_copy(
@@ -79,6 +92,7 @@ def _approval_action_type(recommendation: Recommendation) -> ApprovalActionType:
         Recommendation.TRIM: ApprovalActionType.TRIM,
         Recommendation.REBALANCE: ApprovalActionType.REBALANCE,
         Recommendation.ESCALATE: ApprovalActionType.ESCALATE,
+        Recommendation.NEEDS_MORE_ANALYSIS: ApprovalActionType.REPORT,
         Recommendation.HOLD: ApprovalActionType.REPORT,
         Recommendation.INFORM: ApprovalActionType.REPORT,
     }

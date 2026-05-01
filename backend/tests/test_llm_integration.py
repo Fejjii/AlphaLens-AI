@@ -257,9 +257,12 @@ def test_openai_error_falls_back_cleanly(tmp_path: Path, kb_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_agent_chat_endpoint_returns_decision(client: AsyncClient) -> None:
+async def test_agent_chat_endpoint_returns_decision(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
     payload = {"messages": [{"role": "user", "content": "How is my portfolio doing?"}]}
-    response = await client.post("/agent/chat", json=payload)
+    response = await client.post("/agent/chat", json=payload, headers=auth_headers)
 
     assert response.status_code == 200
     body = response.json()

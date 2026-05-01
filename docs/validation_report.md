@@ -4,21 +4,24 @@ This report summarizes the final submission validation status for AlphaLens AI.
 
 ## Summary
 
-- Backend tests: `178 passed`
+- Backend tests: `199 passed`
 - Frontend lint: passed
-- Frontend build artifact: generated
-- Docker full stack: green
-- Healthchecks: green
-- Known local environment caveats: documented below
+- Frontend build: passed
+- Docker compose config: passed
+- Docker full stack up/build: passed
+- Endpoint smoke suite (`/health`, `/auth`, `/chat`, `/usage/summary`,
+  `/reports/summary`, `/scenarios` create + summary): passed
+- Deployment package (`render.yaml` + `docs/deployment.md`): present
+- Known caveats: see notes below (non-blocking)
 
 ## Validation Details
 
 ### Backend tests
 
-Expected / recorded submission result:
+Recorded result:
 
 ```text
-178 passed
+199 passed, 5 warnings
 ```
 
 Backend test command:
@@ -30,11 +33,11 @@ uv run pytest
 
 ### Frontend lint
 
-Validated successfully using the local ESLint binary:
+Validated successfully:
 
 ```bash
 cd frontend
-node ./node_modules/eslint/bin/eslint.js src --ext .js,.jsx,.ts,.tsx
+pnpm lint
 ```
 
 Result:
@@ -43,11 +46,11 @@ Result:
 
 ### Frontend build
 
-Validated successfully through the local Next.js build binary:
+Validated successfully:
 
 ```bash
 cd frontend
-node ./node_modules/next/dist/bin/next build
+pnpm build
 ```
 
 Observed result:
@@ -55,56 +58,82 @@ Observed result:
 - compile completed successfully
 - linting and type validation completed
 - static pages were generated
-- build artifact `.next/BUILD_ID` was generated
+- build traces completed
+
+### Docker compose config
+
+Validated successfully:
+
+```bash
+docker compose config
+```
+
+Result:
+
+- Compose file resolved cleanly
+- Service graph and healthchecks valid
 
 ### Docker full stack
 
-Submission target status:
+Validated successfully:
 
-- `docker compose up --build` green
-- `frontend`, `backend`, `postgres`, `redis`, and `qdrant` services healthy
+```bash
+docker compose up -d --build
+docker compose ps
+```
 
-Compose file includes healthchecks for:
+Observed status:
 
-- Postgres
-- Redis
-- Qdrant
-- backend
-- frontend
+- `frontend`, `backend`, `postgres`, `redis`, `qdrant` all healthy
+- image builds completed for backend/frontend
+- service healthchecks green
 
-### Healthchecks
+### Endpoint smoke tests
 
-Expected green checks in a healthy stack:
+Smoke flow included authenticated register/login and endpoint calls.
 
-- backend `GET /health`
-- frontend root route
-- Redis ping
-- Postgres readiness
-- Qdrant readiness
+Endpoints validated:
+
+- `GET /health` -> 200
+- `POST /auth/register` -> 200
+- `POST /auth/login` -> 200
+- `POST /chat` -> 200
+- `GET /usage/summary` -> 200
+- `GET /reports/summary` -> 200
+- `POST /scenarios` -> 200
+- `GET /scenarios/summary` -> 200
+- frontend root `GET /` -> 200 (`http://localhost:3000`)
+
+### Deployment config status
+
+Deployment packaging present and documented:
+
+- `render.yaml` for split deployment baseline
+- `docs/deployment.md` covering Vercel + Render/Railway + managed Postgres/Redis/Qdrant
+- CI workflows validate backend/frontend/docker/security on PR/push
+- Backend Docker image now includes `data/` so scenario and RAG runtime paths
+  resolve consistently inside containers
 
 ## Known Local Environment Caveats
 
-These caveats do not change the product architecture or submission package, but
-they are relevant when reproducing validation locally.
+### Scenario packaging caveat resolved
 
-### Package manager shims may be missing from shell PATH
+Backend image packaging now copies the repository `data/` directory into
+`/app/data`. Revalidated behavior:
 
-In this local shell environment:
+- `POST /scenarios` -> 200 in Docker runtime
+- `GET /scenarios/summary` -> 200 in Docker runtime
 
-- `pnpm` was not available on `PATH`
-- `npm` was not available on `PATH`
-- `node` was available
+The previous missing-holdings-file caveat is resolved.
 
-Because of that, frontend validation was executed via local binaries under
-`node_modules` instead of package-manager commands.
+### Backend test warnings remain non-blocking
 
-### Next.js build process may not exit cleanly in this shell
+Observed warnings:
 
-The local `next build` invocation completed compile, type/lint checks, static
-page generation, optimization, and produced build artifacts, but the process
-did not terminate cleanly on its own in this shell session. Since `.next`
-artifacts and generated pages were present, this is documented as an
-environment-specific caveat rather than a confirmed application build failure.
+- deprecation warning for `HTTP_422_UNPROCESSABLE_ENTITY`
+- pydantic serializer warning in plan serialization tests
+
+Tests still pass and API behavior remains validated.
 
 ### Deterministic fallback mode is expected behavior
 

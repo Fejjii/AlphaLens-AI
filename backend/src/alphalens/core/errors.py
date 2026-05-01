@@ -18,9 +18,10 @@ class AppError(Exception):
     status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR
     code: str = "internal_error"
 
-    def __init__(self, message: str, *, code: str | None = None) -> None:
+    def __init__(self, message: str, *, code: str | None = None, details: object | None = None) -> None:
         super().__init__(message)
         self.message = message
+        self.details = details
         if code is not None:
             self.code = code
 
@@ -49,7 +50,7 @@ def _error_response(status_code: int, code: str, message: str, details: object |
 
 async def _app_error_handler(_: Request, exc: AppError) -> JSONResponse:
     log.warning("app_error", code=exc.code, message=exc.message)
-    return _error_response(exc.status_code, exc.code, exc.message)
+    return _error_response(exc.status_code, exc.code, exc.message, details=exc.details)
 
 
 async def _validation_handler(_: Request, exc: RequestValidationError) -> JSONResponse:

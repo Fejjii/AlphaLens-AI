@@ -53,6 +53,7 @@ export const mockPortfolio: PortfolioSummary = {
 export const mockApprovals: Approval[] = [
   {
     approval_id: "apv_001",
+    user_id: "user_demo",
     created_at: new Date().toISOString(),
     status: "pending",
     action_type: "buy",
@@ -71,6 +72,7 @@ export const mockApprovals: Approval[] = [
   },
   {
     approval_id: "apv_002",
+    user_id: "user_demo",
     created_at: new Date().toISOString(),
     status: "pending",
     action_type: "rebalance",
@@ -88,6 +90,7 @@ export const mockApprovals: Approval[] = [
   },
   {
     approval_id: "apv_003",
+    user_id: "user_demo",
     created_at: new Date().toISOString(),
     status: "pending",
     action_type: "trim",
@@ -174,6 +177,7 @@ export const mockUsageEvents: UsageEvent[] = [
 export const mockReports: ReportResponse[] = [
   {
     id: "rpt_demo",
+    user_id: "user_demo",
     title: "Investment Memo · NVDA",
     report_type: "investment_memo",
     conversation_id: "conv_demo",
@@ -206,6 +210,7 @@ export const mockReportSummary: ReportSummary = {
 export const mockScenarios: ScenarioResponse[] = [
   {
     id: "scn_demo",
+    user_id: "user_demo",
     title: "Price shock · NVDA",
     scenario_type: "price_shock",
     ticker: "NVDA",

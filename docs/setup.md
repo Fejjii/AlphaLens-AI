@@ -45,6 +45,11 @@ Run tests:
 uv run pytest
 ```
 
+The backend startup path now creates SQLAlchemy tables for approvals, feedback,
+reports, scenarios, usage events, users, and conversation memory when Postgres
+is enabled. For long-lived production environments, add Alembic migrations once
+the schema starts evolving beyond the MVP.
+
 Lint and format:
 
 ```bash
@@ -62,6 +67,10 @@ pnpm dev
 ```
 
 App: http://localhost:3000.
+
+For local Windows builds, `pnpm build` runs without Next.js standalone output
+by default to avoid symlink permission issues. Docker/production image builds
+explicitly set `NEXT_STANDALONE=true` so `.next/standalone` is still generated.
 
 ## Full stack via Docker
 
@@ -90,6 +99,8 @@ This builds and runs `backend` and `frontend` alongside the data plane.
 | `LOG_LEVEL` | Backend log level |
 | `DATABASE_URL` / `APP_DATABASE_URL` | Runtime DB URL / local psycopg URL |
 | `PERSISTENCE_BACKEND` | `in_memory` or `postgres` workflow persistence |
+| `RATE_LIMIT_BACKEND` / `RATE_LIMIT_REDIS_URL` | In-memory or Redis-backed rate limiting for multi-instance deployments |
+| `RATE_LIMIT_*` | Per-route thresholds for auth, chat, speech, reports, scenarios, and feedback |
 | `REDIS_URL` | Redis URL |
 | `QDRANT_URL` | Qdrant base URL |
 | `KNOWLEDGE_BASE_PATH` / `RAG_COLLECTION` / `RAG_EMBEDDING_DIM` | RAG knowledge store configuration |
@@ -101,3 +112,5 @@ This builds and runs `backend` and `frontend` alongside the data plane.
 | `LANGCHAIN_TRACING_V2` / `LANGCHAIN_API_KEY` / `LANGCHAIN_PROJECT` | Optional LangSmith tracing |
 
 For Docker runtime, the frontend uses a Next.js proxy route (`/api/backend/*`) so browser requests stay same-origin while the frontend container reaches backend over the Docker network (`http://backend:8000`).
+
+In production, set `RATE_LIMIT_BACKEND=redis` and point `RATE_LIMIT_REDIS_URL` at a shared Redis instance so counters are enforced across all API replicas. Keep `RATE_LIMIT_BACKEND=memory` for local and test runs when you want deterministic single-process behavior.

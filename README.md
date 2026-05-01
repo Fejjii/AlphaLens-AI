@@ -60,10 +60,13 @@ AlphaLens is split into three surfaces:
 See the full architecture package:
 
 - [docs/architecture.md](docs/architecture.md)
+- [docs/codebase_guide.md](docs/codebase_guide.md)
+- [docs/scripts.md](docs/scripts.md)
 - [docs/decisions.md](docs/decisions.md)
 - [docs/demo_script.md](docs/demo_script.md)
 - [docs/validation_report.md](docs/validation_report.md)
 - [docs/setup.md](docs/setup.md)
+- [docs/deployment.md](docs/deployment.md)
 
 ## Tech Stack
 
@@ -98,7 +101,7 @@ See the full architecture package:
 AlphaLens-AI/
   backend/      FastAPI service, agent orchestration, tools, tests
   frontend/     Next.js dashboard and reviewer-facing UI
-  docs/         Architecture, ADRs, demo script, validation report
+  docs/         Architecture, scripts, codebase guide, demo, validation, deploy
   data/         Synthetic fixtures and knowledge sources
   docker-compose.yml
   .env.example
@@ -174,6 +177,18 @@ This launches:
 - `qdrant`
 - `backend`
 - `frontend`
+
+## Deployment Targets
+
+AlphaLens is prepared for a split deployment:
+
+- `frontend/` on Vercel
+- `backend/` on Render or Railway
+- managed Postgres, Redis, and Qdrant services for production persistence and
+  retrieval
+
+See [docs/deployment.md](docs/deployment.md) for the environment variables,
+proxy setup, CORS checklist, managed service notes, and smoke-test checklist.
 
 Useful commands:
 
@@ -295,6 +310,34 @@ node ./node_modules/next/dist/bin/next build
 docker compose up --build
 docker compose ps
 ```
+
+## CI / GitHub Actions
+
+Pull requests and pushes to `main` or `master` run a small CI matrix that is
+designed to work without real provider keys:
+
+- `backend-ci.yml`: installs `uv`, syncs backend dependencies, runs `pytest`,
+  `ruff`, and `mypy` with deterministic fallback environment variables
+- `frontend-ci.yml`: uses Node 20 and `pnpm` to run `lint` and `build` with
+  safe `/api/backend` defaults so the frontend does not need a live backend
+- `docker-ci.yml`: validates `docker compose config` and builds the backend and
+  frontend images
+- `security-ci.yml`: runs dependency review on pull requests and a repository
+  secret scan with Gitleaks
+
+All checks are intentionally lightweight and avoid requiring external API
+credentials.
+
+## Production Readiness
+
+AlphaLens includes deployment and validation scaffolding for practical
+production-style evaluation:
+
+- split deployment path (Vercel + Render/Railway + managed data services)
+- deterministic fallback posture when optional providers are unavailable
+- CI gates for backend, frontend, Docker, and security hygiene
+- documented smoke tests and validation report for reproducibility
+- Docker runtime parity for scenario and RAG data paths
 
 ## Limitations
 

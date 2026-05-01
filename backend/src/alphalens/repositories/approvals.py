@@ -19,9 +19,14 @@ from alphalens.schemas.approval import (
 class ApprovalRepository(Protocol):
     def create(self, record: ApprovalRecord) -> ApprovalRecord: ...
 
-    def list(self, status: ApprovalStatus | None = None) -> list[ApprovalRecord]: ...
+    def list(
+        self,
+        *,
+        user_id: str,
+        status: ApprovalStatus | None = None,
+    ) -> list[ApprovalRecord]: ...
 
-    def get(self, approval_id: str) -> ApprovalRecord | None: ...
+    def get(self, approval_id: str, *, user_id: str) -> ApprovalRecord | None: ...
 
     def update(self, record: ApprovalRecord) -> ApprovalRecord: ...
 
@@ -34,14 +39,22 @@ class InMemoryApprovalRepository(ApprovalRepository):
         self._records[record.approval_id] = record
         return record
 
-    def list(self, status: ApprovalStatus | None = None) -> list[ApprovalRecord]:
-        records = list(self._records.values())
+    def list(
+        self,
+        *,
+        user_id: str,
+        status: ApprovalStatus | None = None,
+    ) -> list[ApprovalRecord]:
+        records = [record for record in self._records.values() if record.user_id == user_id]
         if status is not None:
             records = [record for record in records if record.status is status]
         return sorted(records, key=lambda record: record.created_at, reverse=True)
 
-    def get(self, approval_id: str) -> ApprovalRecord | None:
-        return self._records.get(approval_id)
+    def get(self, approval_id: str, *, user_id: str) -> ApprovalRecord | None:
+        record = self._records.get(approval_id)
+        if record is None or record.user_id != user_id:
+            return None
+        return record
 
     def update(self, record: ApprovalRecord) -> ApprovalRecord:
         self._records[record.approval_id] = record
@@ -63,17 +76,29 @@ class SqlAlchemyApprovalRepository(ApprovalRepository):
             session.commit()
         return record
 
-    def list(self, status: ApprovalStatus | None = None) -> list[ApprovalRecord]:
+    def list(
+        self,
+        *,
+        user_id: str,
+        status: ApprovalStatus | None = None,
+    ) -> list[ApprovalRecord]:
         with self._session_factory() as session:
-            query = session.query(ApprovalRecordModel)
+            query = session.query(ApprovalRecordModel).filter(ApprovalRecordModel.user_id == user_id)
             if status is not None:
                 query = query.filter(ApprovalRecordModel.status == status.value)
             rows = query.order_by(ApprovalRecordModel.created_at.desc()).all()
             return [_to_schema(row) for row in rows]
 
-    def get(self, approval_id: str) -> ApprovalRecord | None:
+    def get(self, approval_id: str, *, user_id: str) -> ApprovalRecord | None:
         with self._session_factory() as session:
-            row = session.get(ApprovalRecordModel, approval_id)
+            row = (
+                session.query(ApprovalRecordModel)
+                .filter(
+                    ApprovalRecordModel.approval_id == approval_id,
+                    ApprovalRecordModel.user_id == user_id,
+                )
+                .one_or_none()
+            )
             if row is None:
                 return None
             return _to_schema(row)
@@ -92,6 +117,7 @@ class SqlAlchemyApprovalRepository(ApprovalRepository):
 def _to_model(record: ApprovalRecord) -> ApprovalRecordModel:
     return ApprovalRecordModel(
         approval_id=record.approval_id,
+        user_id=record.user_id,
         created_at=record.created_at,
         status=record.status.value,
         action_type=record.action_type.value,
@@ -107,6 +133,7 @@ def _to_model(record: ApprovalRecord) -> ApprovalRecordModel:
 
 
 def _update_model(model: ApprovalRecordModel, record: ApprovalRecord) -> None:
+    model.user_id = record.user_id
     model.created_at = record.created_at
     model.status = record.status.value
     model.action_type = record.action_type.value
@@ -123,6 +150,7 @@ def _update_model(model: ApprovalRecordModel, record: ApprovalRecord) -> None:
 def _to_schema(model: ApprovalRecordModel) -> ApprovalRecord:
     return ApprovalRecord(
         approval_id=model.approval_id,
+        user_id=model.user_id,
         created_at=model.created_at,
         status=ApprovalStatus(model.status),
         action_type=ApprovalActionType(model.action_type),

@@ -40,6 +40,7 @@ class ScenarioCreate(APIModel):
 
 class ScenarioResponse(APIModel):
     id: str
+    user_id: str
     title: str
     scenario_type: ScenarioType
     ticker: str | None = None
@@ -53,6 +54,11 @@ class ScenarioResponse(APIModel):
     risk_level: str
     recommendation: str
     approval_required: bool
+    disclaimer: str | None = None
+    limitations: list[str] = Field(default_factory=list)
+    evidence_count: int = 0
+    policy_flags: list[str] = Field(default_factory=list)
+    approval_required_reason: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
 
 

@@ -23,6 +23,7 @@ from alphalens.services.approvals_service import ApprovalsService
 def _sample_record(approval_id: str = "apv_test_1") -> ApprovalRecord:
     return ApprovalRecord(
         approval_id=approval_id,
+        user_id="usr_repo_test",
         created_at=datetime.now(tz=UTC),
         status=ApprovalStatus.PENDING,
         action_type=ApprovalActionType.BUY,
@@ -52,8 +53,8 @@ def test_in_memory_repository_create_list_get_update() -> None:
     record = _sample_record()
 
     created = repo.create(record)
-    fetched = repo.get(record.approval_id)
-    listed = repo.list()
+    fetched = repo.get(record.approval_id, user_id="usr_repo_test")
+    listed = repo.list(user_id="usr_repo_test")
 
     assert created.approval_id == record.approval_id
     assert fetched is not None
@@ -68,7 +69,7 @@ def test_in_memory_repository_create_list_get_update() -> None:
         }
     )
     repo.update(updated)
-    saved = repo.get(record.approval_id)
+    saved = repo.get(record.approval_id, user_id="usr_repo_test")
     assert saved is not None
     assert saved.status is ApprovalStatus.APPROVED
     assert saved.reviewer_note == "Looks good."
@@ -94,14 +95,15 @@ def test_approval_service_works_with_repository() -> None:
         confidence=0.65,
     )
 
-    record = service.create_approval_from_decision(decision)
+    record = service.create_approval_from_decision(decision, user_id="usr_service_test")
     assert record.approval_id.startswith("apv_")
-    assert service.get_approval(record.approval_id) is not None
-    assert len(service.list_approvals()) == 1
+    assert service.get_approval(record.approval_id, user_id="usr_service_test") is not None
+    assert len(service.list_approvals(user_id="usr_service_test")) == 1
 
     decided = service.decide_approval(
         record.approval_id,
         ApprovalDecision(status=ApprovalStatus.APPROVED, reviewer_note="Approved"),
+        user_id="usr_service_test",
     )
     assert decided is not None
     assert decided.status is ApprovalStatus.APPROVED
@@ -114,7 +116,7 @@ def test_sqlalchemy_repository_persists_approval_with_sqlite() -> None:
     record = _sample_record("apv_sql_1")
     repo.create(record)
 
-    fetched = repo.get("apv_sql_1")
+    fetched = repo.get("apv_sql_1", user_id="usr_repo_test")
     assert fetched is not None
     assert fetched.approval_id == "apv_sql_1"
     assert fetched.recommendation is Recommendation.BUY
@@ -135,7 +137,7 @@ def test_sqlalchemy_repository_decision_update_persists_note_and_decided_at() ->
     )
 
     repo.update(updated)
-    saved = repo.get("apv_sql_2")
+    saved = repo.get("apv_sql_2", user_id="usr_repo_test")
     assert saved is not None
     assert saved.status is ApprovalStatus.REJECTED
     assert saved.reviewer_note == "Need more downside analysis."

@@ -31,6 +31,7 @@ class ApprovalActionType(str, Enum):
 
 class ApprovalRecord(APIModel):
     approval_id: str
+    user_id: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
     status: ApprovalStatus = ApprovalStatus.PENDING
     action_type: ApprovalActionType

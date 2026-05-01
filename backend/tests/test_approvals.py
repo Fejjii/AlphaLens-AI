@@ -10,8 +10,7 @@ from alphalens.schemas.agent import (
     RiskLevel,
 )
 
-
-def _seed_pending_approval() -> str:
+def _seed_pending_approval(*, user_id: str) -> str:
     service = deps.get_approvals_service()
     record = service.create_approval_from_decision(
         AgentDecision(
@@ -26,14 +25,20 @@ def _seed_pending_approval() -> str:
                 )
             ],
             requires_approval=True,
-        )
+        ),
+        user_id=user_id,
     )
     return record.approval_id
 
 
-async def test_list_approvals(client: AsyncClient) -> None:
-    approval_id = _seed_pending_approval()
-    response = await client.get("/approvals", params={"status": "pending"})
+async def test_list_approvals(
+    client: AsyncClient,
+    auth_session: dict[str, object],
+) -> None:
+    user_id = str(auth_session["user"]["id"])  # type: ignore[index]
+    auth_headers = auth_session["headers"]  # type: ignore[assignment]
+    approval_id = _seed_pending_approval(user_id=user_id)
+    response = await client.get("/approvals", params={"status": "pending"}, headers=auth_headers)
     assert response.status_code == 200
     body = response.json()
     assert len(body) == 1
@@ -41,10 +46,12 @@ async def test_list_approvals(client: AsyncClient) -> None:
     assert body[0]["status"] == "pending"
 
 
-async def test_get_approval_by_id(client: AsyncClient) -> None:
-    approval_id = _seed_pending_approval()
+async def test_get_approval_by_id(client: AsyncClient, auth_session: dict[str, object]) -> None:
+    user_id = str(auth_session["user"]["id"])  # type: ignore[index]
+    auth_headers = auth_session["headers"]  # type: ignore[assignment]
+    approval_id = _seed_pending_approval(user_id=user_id)
 
-    response = await client.get(f"/approvals/{approval_id}")
+    response = await client.get(f"/approvals/{approval_id}", headers=auth_headers)
 
     assert response.status_code == 200
     body = response.json()
@@ -52,12 +59,15 @@ async def test_get_approval_by_id(client: AsyncClient) -> None:
     assert body["action_type"] == "buy"
 
 
-async def test_approve_approval(client: AsyncClient) -> None:
-    approval_id = _seed_pending_approval()
+async def test_approve_approval(client: AsyncClient, auth_session: dict[str, object]) -> None:
+    user_id = str(auth_session["user"]["id"])  # type: ignore[index]
+    auth_headers = auth_session["headers"]  # type: ignore[assignment]
+    approval_id = _seed_pending_approval(user_id=user_id)
 
     response = await client.post(
         f"/approvals/{approval_id}/decision",
         json={"status": "approved", "reviewer_note": "Reviewed and accepted."},
+        headers=auth_headers,
     )
 
     assert response.status_code == 200
@@ -68,12 +78,15 @@ async def test_approve_approval(client: AsyncClient) -> None:
     assert body["decided_at"] is not None
 
 
-async def test_reject_approval(client: AsyncClient) -> None:
-    approval_id = _seed_pending_approval()
+async def test_reject_approval(client: AsyncClient, auth_session: dict[str, object]) -> None:
+    user_id = str(auth_session["user"]["id"])  # type: ignore[index]
+    auth_headers = auth_session["headers"]  # type: ignore[assignment]
+    approval_id = _seed_pending_approval(user_id=user_id)
 
     response = await client.post(
         f"/approvals/{approval_id}/decision",
         json={"status": "rejected", "reviewer_note": "Not aligned with mandate."},
+        headers=auth_headers,
     )
 
     assert response.status_code == 200
@@ -82,8 +95,13 @@ async def test_reject_approval(client: AsyncClient) -> None:
     assert body["reviewer_note"] == "Not aligned with mandate."
 
 
-async def test_needs_more_analysis_flow(client: AsyncClient) -> None:
-    approval_id = _seed_pending_approval()
+async def test_needs_more_analysis_flow(
+    client: AsyncClient,
+    auth_session: dict[str, object],
+) -> None:
+    user_id = str(auth_session["user"]["id"])  # type: ignore[index]
+    auth_headers = auth_session["headers"]  # type: ignore[assignment]
+    approval_id = _seed_pending_approval(user_id=user_id)
 
     response = await client.post(
         f"/approvals/{approval_id}/decision",
@@ -91,6 +109,7 @@ async def test_needs_more_analysis_flow(client: AsyncClient) -> None:
             "status": "needs_more_analysis",
             "reviewer_note": "Add downside scenario analysis.",
         },
+        headers=auth_headers,
     )
 
     assert response.status_code == 200
@@ -115,18 +134,22 @@ async def test_approval_record_copies_risk_level_and_confidence_from_decision() 
         confidence=0.85,
     )
 
-    record = service.create_approval_from_decision(decision)
+    record = service.create_approval_from_decision(decision, user_id="usr_local_test")
 
     assert record.risk_level == "high"
     assert record.confidence == 0.85
 
 
-async def test_invalid_approval_id_returns_404(client: AsyncClient) -> None:
-    response = await client.get("/approvals/apv_missing")
+async def test_invalid_approval_id_returns_404(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await client.get("/approvals/apv_missing", headers=auth_headers)
     assert response.status_code == 404
 
     response = await client.post(
         "/approvals/apv_missing/decision",
         json={"status": "approved"},
+        headers=auth_headers,
     )
     assert response.status_code == 404

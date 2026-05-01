@@ -133,7 +133,7 @@ def test_violation_triggers_escalate_and_approval(tmp_path: Path, kb_dir: Path) 
     assert decision.recommendation.value == "escalate"
     assert decision.requires_approval is True
     assert decision.approval_id is not None
-    approval = approvals_service.get_approval(decision.approval_id)
+    approval = approvals_service.get_approval(decision.approval_id, user_id="usr_demo")
     assert approval is not None
     assert approval.status.value == "pending"
     assert approval.recommendation.value == "escalate"
@@ -223,4 +223,4 @@ def test_approval_not_created_when_decision_does_not_require_it(
     assert decision is not None
     assert decision.requires_approval is False
     assert decision.approval_id is None
-    assert approvals_service.list_approvals() == []
+    assert approvals_service.list_approvals(user_id="usr_demo") == []

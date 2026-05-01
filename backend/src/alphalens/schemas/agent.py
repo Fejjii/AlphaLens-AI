@@ -35,6 +35,7 @@ class Citation(APIModel):
 class Recommendation(str, Enum):
     INFORM = "inform"
     HOLD = "hold"
+    NEEDS_MORE_ANALYSIS = "needs_more_analysis"
     BUY = "buy"
     SELL = "sell"
     TRIM = "trim"
@@ -62,10 +63,15 @@ class AgentDecision(APIModel):
     recommendation: Recommendation
     reasoning: list[str] = Field(default_factory=list)
     evidence: list[EvidenceItem] = Field(default_factory=list)
+    disclaimer: str | None = None
+    limitations: list[str] = Field(default_factory=list)
     requires_approval: bool = False
     approval_id: str | None = None
     risk_level: RiskLevel = RiskLevel.LOW
     confidence: float = Field(default=0.7, ge=0.0, le=1.0)
+    evidence_count: int = 0
+    approval_required_reason: str | None = None
+    policy_flags: list[str] = Field(default_factory=list)
 
 
 class ChatRequest(APIModel):

@@ -1,253 +1,197 @@
 # Demo Script
 
-This script is designed for a 5 to 7 minute reviewer walkthrough of AlphaLens
-AI. It follows the product narrative from portfolio visibility to agent
-investigation, human approval, memo generation, scenario analysis, usage
-tracking, and system controls.
+This script is designed for a 7 to 10 minute reviewer walkthrough of AlphaLens
+AI and maps directly to the product workflow and validation package.
 
 ## Demo Goal
 
-Show that AlphaLens is a polished investment intelligence workflow, not just a
-chatbot:
+Show that AlphaLens is a production-minded investment intelligence workflow:
 
-- grounded in portfolio and research context,
-- capable of structured decision support,
-- explicit about evidence and tool use,
-- safe through human approval,
-- measurable through usage and feedback,
-- stable in deterministic demo mode.
+- authenticated user journey (register/login)
+- plan-aware usage controls and quota visibility
+- agent recommendations with compliance metadata
+- human approval and audit path
+- memo and scenario outputs
+- feedback and usage observability
+- deterministic fallback behavior without live provider keys
 
 ## Before You Start
 
-- Start the frontend and backend, or the Docker full stack.
-- Confirm the dashboard loads.
-- If live providers are not configured, keep fallback mode enabled. The demo is
-  designed to work in deterministic mode.
+- Start full stack (`docker compose up --build`) or run backend/frontend locally.
+- Confirm frontend (`http://localhost:3000`) and backend health (`/health`).
+- Keep fallback providers enabled if external keys are unavailable.
+- Have `docs/validation_report.md`, CI workflows in `.github/workflows`, and
+  `docs/deployment.md` available for final reviewer questions.
 
 ## Suggested Timing
 
-1. Dashboard framing: 45 to 60 seconds
-2. Chat question and decision card: 90 to 120 seconds
-3. Approval queue: 45 to 60 seconds
-4. Memo generation: 45 to 60 seconds
-5. Scenario simulation: 45 to 60 seconds
-6. Usage, feedback, settings: 60 to 90 seconds
+1. Auth and dashboard framing: 60 to 90 seconds
+2. Plan badge, quota, and settings context: 45 to 60 seconds
+3. Agent chat and compliance metadata: 90 to 120 seconds
+4. Approval workflow: 60 to 90 seconds
+5. Memo generation: 45 to 60 seconds
+6. Scenario simulation: 45 to 60 seconds
+7. Feedback and usage dashboard: 60 to 90 seconds
+8. CI/CD and deployment wrap-up: 30 to 45 seconds
 
 ## Demo Flow
 
-### 1. Dashboard
+### 1. Login / Register
 
-Open `/` and say:
-
-> AlphaLens brings portfolio monitoring, agent investigation, approvals,
-> reports, scenarios, and usage tracking into a single reviewer-facing product.
-
-Call out:
-
-- NAV, day P&L, and risk metrics
-- top positions and alerts
-- pending approvals preview
-- usage visibility on the main dashboard
-
-### 2. Chat Investment Question
-
-Open `/chat` or `/agent` and use this sample prompt:
-
-```text
-Review NVDA in the context of our current portfolio. Should we add, trim, or hold?
-Include portfolio concentration, market context, macro signals, SEC filing context,
-and any relevant research evidence.
-```
+Open `/register`, create a user, then log in at `/login`.
 
 Narrate:
 
-> This is where AlphaLens investigates across portfolio, policy, market, news,
-> macro, SEC, and retrieval-backed research context in one thread.
+> AlphaLens starts with authenticated access so plans, approvals, reports,
+> scenarios, and usage telemetry are scoped to the current user.
 
-What to show:
+Show:
 
-- assistant answer
-- evidence badges
-- tool/investigation steps
-- decision card
+- registration success
+- login success
+- authenticated app shell navigation
 
-### 3. Decision Card
+### 2. Dashboard framing
 
-Stay on the same chat result and point to:
+Open `/` and frame the platform:
 
-- recommendation
-- risk badge
-- confidence badge
-- approval state
-- evidence and reasoning summary
+> AlphaLens combines portfolio visibility, agent investigation, approval gates,
+> reports, scenarios, and cost-aware observability in one product workflow.
 
-Suggested narration:
+Show:
 
-> The decision card makes the model output reviewable. It separates the answer
-> from the action recommendation, confidence, evidence, and approval state.
+- NAV / day P&L / risk metrics
+- top holdings and risk signals
+- pending approvals and usage snapshot
 
-If a second prompt is helpful, use:
+### 3. Plan badge and quota
+
+Open `/settings` briefly before chat.
+
+Show:
+
+- current plan badge
+- monthly quota usage rows
+- enabled tool/model capability chips
+
+Narrate:
+
+> The UI surfaces plan and quota context before execution so reviewers can
+> evaluate both behavior and policy constraints.
+
+### 4. Agent chat + compliance metadata
+
+Open `/chat` (or `/agent`) and run:
 
 ```text
-Would this recommendation require human approval under a conservative risk workflow?
+Review NVDA in the context of our portfolio. Recommend buy/hold/trim with
+concentration risk, macro/market context, and approval rationale.
 ```
 
-### 4. Approval Request
+Show on the response card:
+
+- recommendation, risk, confidence
+- evidence and tool usage
+- compliance metadata (`policy_flags`, `approval_required_reason`,
+  `requires_approval`)
+
+Narrate:
+
+> AlphaLens does not only generate text; it returns structured decision metadata
+> for governance and auditability.
+
+### 5. Approval workflow
 
 Open `/approvals`.
 
-Suggested narration:
+Show:
 
-> AlphaLens does not assume autonomy is enough. Recommendations that warrant
-> review are routed into a human-in-the-loop approval queue with audit-friendly
-> state tracking.
+- pending item details and rationale
+- status lifecycle (`pending`, `approved`, `rejected`, `needs_more_analysis`)
+- reviewer action buttons and notes path
 
-What to show:
+### 6. Memo generation
 
-- approval status
-- rationale
-- audit trail
-- approve / reject / more analysis actions
-
-If there is a pending item, click one of the actions and explain the updated
-state. If you prefer not to mutate state during the demo, just describe the
-action row and current approval status.
-
-### 5. Memo Generation
-
-Return to the decision card in chat or open `/reports`.
-
-If using chat, click `Generate memo`.
-
-If using the reports page directly, use this sample prompt:
+Open `/reports` and generate an investment memo:
 
 ```text
-Create an investment memo for NVDA based on the current portfolio context,
-including concentration risk, supporting evidence, and approval considerations.
+Create an investment memo for NVDA including thesis, risk controls, and
+approval considerations.
 ```
 
-Narrate:
+Show:
 
-> AlphaLens can convert a chat investigation into a structured artifact that is
-> easier to review, share, and compare than a raw transcript.
+- report type and generated sections
+- citations/evidence references
+- reviewable memo structure
 
-What to show:
+### 7. Scenario simulation
 
-- report type
-- generated sections
-- concise memo structure
+Open `/scenarios` and run a deterministic scenario, for example:
 
-### 6. Scenario Simulation
-
-Open `/scenarios`.
-
-Use a deterministic sample scenario such as:
-
-- scenario type: `price shock`
+- type: `price_shock`
 - ticker: `NVDA`
-- shock percent: `-0.10`
-- assumptions:
+- shock: `-0.10`
 
-```text
-AI infrastructure demand remains strong
-Concentration risk remains elevated
-Review impact under current portfolio weights
-```
+Show:
 
-Narrate:
-
-> Scenarios turn the conversation from recommendation into what-if analysis.
-> This is especially useful for reviewer evaluation because the behavior is
-> deterministic and easy to compare.
-
-What to show:
-
-- portfolio impact
+- simulated portfolio impact
 - affected holdings
-- recommendation
-- approval-required signal if present
+- scenario recommendation and risk framing
 
-### 7. Usage and Cost Dashboard
+### 8. Feedback loop + usage/cost dashboard
 
-Open `/usage`.
+In chat, submit thumbs up/down feedback on a response.
+Then open `/usage`.
 
-Narrate:
+Show:
 
-> AlphaLens treats observability as a product concern, not just an engineering
-> concern. Reviewers can inspect event types, tool usage, provider activity,
-> estimated cost, and user feedback in one place.
-
-What to show:
-
-- estimated cost
-- total events
-- event table
-- provider or tool breakdown
-- feedback summary
-
-### 8. Feedback Loop
-
-Return to chat and show the thumbs up / thumbs down controls on a response.
-
-Suggested narration:
-
-> Review feedback is captured directly at the response level, which creates a
-> path toward evaluation, ranking, and future tuning.
-
-### 9. Settings, Tools, and Providers
-
-Open `/settings`.
+- total events and estimated cost
+- event breakdown (LLM/tool/cache/report/feedback)
+- provider/tool level visibility
 
 Narrate:
 
-> The settings surface makes the runtime posture legible: model selection,
-> enabled tools, provider status, and deterministic fallback-friendly
-> configuration.
+> Feedback and usage are first-class outputs, enabling evaluation and safe
+> iteration instead of opaque model behavior.
 
-Call out:
+### 9. Settings / tools / providers
 
-- provider availability
+Return to `/settings` and call out:
+
+- provider status indicators
 - tool toggles
-- local/demo runtime endpoint
-- deterministic fallback posture
+- runtime endpoint / proxy posture
+- deterministic fallback readiness
 
-## Exact Prompt Set
+### 10. CI/CD and deployment package
 
-Use any or all of the following during the walkthrough.
+Close with repository evidence:
 
-### Primary investment question
+- CI workflows in `.github/workflows` (backend, frontend, docker, security)
+- deployment guide in `docs/deployment.md`
+- final checks in `docs/validation_report.md`
+
+## Prompt Set (Quick Copy)
 
 ```text
-Review NVDA in the context of our current portfolio. Should we add, trim, or hold?
-Include portfolio concentration, market context, macro signals, SEC filing context,
-and any relevant research evidence.
+Review NVDA in the context of our portfolio. Recommend buy/hold/trim with concentration risk, macro/market context, and approval rationale.
 ```
 
-### Approval framing
-
 ```text
-Would this recommendation require human approval under a conservative risk workflow?
-Explain why.
+Would this recommendation require human approval under a conservative policy workflow? Explain policy flags.
 ```
 
-### Memo prompt
-
 ```text
-Create an investment memo for NVDA based on the current portfolio context,
-including concentration risk, supporting evidence, and approval considerations.
+Create an investment memo for NVDA including thesis, risk controls, and approval considerations.
 ```
 
-### Alternative chat prompt
-
 ```text
-Compare trimming NVDA versus holding it. Focus on portfolio concentration,
-recent market signals, macro backdrop, and risk-control implications.
+Simulate a -10% NVDA price shock and summarize impact by holdings and recommended response.
 ```
 
 ## Closing Line
 
-End with:
-
-> AlphaLens is designed to show what a production-minded financial AI workflow
-> looks like: grounded context, structured decisions, human approval, measurable
-> usage, and deterministic demo stability.
+> AlphaLens demonstrates an end-to-end AI workflow for investment review:
+> authenticated access, plan-aware controls, structured and auditable decisions,
+> human approvals, measurable usage, and deterministic fallback stability.

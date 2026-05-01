@@ -81,14 +81,20 @@ async def speech_client(speech_app) -> AsyncClient:
         yield ac
 
 
-async def test_speech_endpoint_validation(client: AsyncClient) -> None:
-    response = await client.post("/speech/transcribe")
+async def test_speech_endpoint_validation(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await client.post("/speech/transcribe", headers=auth_headers)
     assert response.status_code == 422
 
 
-async def test_speech_endpoint_valid_audio_upload(speech_client: AsyncClient) -> None:
+async def test_speech_endpoint_valid_audio_upload(
+    speech_client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
     files = {"file": ("sample.wav", b"RIFF....WAVEfmt ", "audio/wav")}
-    response = await speech_client.post("/speech/transcribe", files=files)
+    response = await speech_client.post("/speech/transcribe", files=files, headers=auth_headers)
     assert response.status_code == 200
     body = response.json()
     assert body["provider"] == "stub"
@@ -96,14 +102,21 @@ async def test_speech_endpoint_valid_audio_upload(speech_client: AsyncClient) ->
     assert body["detected_language"] == "en"
 
 
-async def test_speech_endpoint_invalid_mime_type(speech_client: AsyncClient) -> None:
+async def test_speech_endpoint_invalid_mime_type(
+    speech_client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
     files = {"file": ("sample.txt", b"hello", "text/plain")}
-    response = await speech_client.post("/speech/transcribe", files=files)
+    response = await speech_client.post("/speech/transcribe", files=files, headers=auth_headers)
     assert response.status_code == 400
 
 
-async def test_speech_endpoint_oversized_file(speech_client: AsyncClient, speech_app) -> None:
+async def test_speech_endpoint_oversized_file(
+    speech_client: AsyncClient,
+    speech_app,
+    auth_headers: dict[str, str],
+) -> None:
     speech_app.state.settings.speech_max_upload_bytes = 1
     files = {"file": ("sample.wav", b"too-big", "audio/wav")}
-    response = await speech_client.post("/speech/transcribe", files=files)
+    response = await speech_client.post("/speech/transcribe", files=files, headers=auth_headers)
     assert response.status_code == 400

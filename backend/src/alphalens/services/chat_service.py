@@ -27,6 +27,7 @@ from alphalens.schemas.agent import (
     Recommendation,
     RiskLevel,
 )
+from alphalens.compliance.policy import DISCLAIMER_TEXT, LIMITATIONS_TEXT, assess_compliance
 from alphalens.services.approvals_service import ApprovalsService
 from alphalens.services.llm_service import LLMService, get_llm_service
 from alphalens.services.macro_service import MacroService, get_macro_service
@@ -46,6 +47,7 @@ from alphalens.tools.registry import ToolRegistry
 from alphalens.tools.risk_tool import make_risk_tool
 from alphalens.tools.sec_tool import make_sec_filings_tool
 from alphalens.tools.web_search_tool import make_web_search_tool
+from alphalens.schemas.user import UserProfile
 
 
 def _resolve_holdings_path(settings: Settings) -> Path:
@@ -137,7 +139,8 @@ class ChatService:
             checkpointer=_build_checkpointer(enabled=settings.memory_enabled),
         )
 
-    def chat(self, request: ChatRequest) -> ChatResponse:
+    def chat(self, request: ChatRequest, *, user: UserProfile | None = None) -> ChatResponse:
+        user = user or _demo_user()
         conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:12]}"
         request_messages = [m.model_dump(mode="json") for m in request.messages]
         latest_user_text = next(
@@ -152,7 +155,7 @@ class ChatService:
             or "auto",
             default_language=detected_language,
         )
-        history = self._memory_service.get_history(conversation_id) if self._memory_enabled else {
+        history = self._memory_service.get_history(conversation_id, user_id=user.id) if self._memory_enabled else {
             "messages": [],
             "metadata": [],
         }
@@ -176,9 +179,11 @@ class ChatService:
             conversation_id,
             final_state,
             approvals_service=self._approvals_service,
+            user_id=user.id,
         )
         self._save_turn(
             conversation_id,
+            user_id=user.id,
             request_messages=request_messages,
             response=response,
             final_state=final_state,
@@ -189,20 +194,23 @@ class ChatService:
     def _memory_enabled(self) -> bool:
         return self._memory_service is not None and self._memory_service.enabled
 
-    def get_memory(self, conversation_id: str) -> dict[str, Any]:
+    def get_memory(self, conversation_id: str, *, user_id: str | None = None) -> dict[str, Any]:
+        user_id = user_id or "usr_demo"
         if not self._memory_enabled:
             return {"messages": [], "metadata": []}
-        return self._memory_service.get_history(conversation_id)
+        return self._memory_service.get_history(conversation_id, user_id=user_id)
 
-    def clear_memory(self, conversation_id: str) -> None:
+    def clear_memory(self, conversation_id: str, *, user_id: str | None = None) -> None:
+        user_id = user_id or "usr_demo"
         if not self._memory_enabled:
             return
-        self._memory_service.clear(conversation_id)
+        self._memory_service.clear(conversation_id, user_id=user_id)
 
     def _save_turn(
         self,
         conversation_id: str,
         *,
+        user_id: str,
         request_messages: list[dict[str, Any]],
         response: ChatResponse,
         final_state: AgentState,
@@ -221,6 +229,7 @@ class ChatService:
         }
         self._memory_service.save_turn(
             conversation_id,
+            user_id=user_id,
             user_message=user_message,
             assistant_message=assistant_message,
             metadata=metadata,
@@ -243,6 +252,7 @@ def _to_response(
     state: AgentState,
     *,
     approvals_service: ApprovalsService,
+    user_id: str,
 ) -> ChatResponse:
     response_id = f"msg_{uuid.uuid4().hex[:12]}"
     answer = state.get("answer") or "(no answer)"
@@ -272,9 +282,25 @@ def _to_response(
         requires_approval=bool(state.get("requires_approval", False)),
         risk_level=RiskLevel(state.get("risk_level", "low")),
         confidence=float(state.get("confidence", 0.7)),
+        disclaimer=DISCLAIMER_TEXT,
+        limitations=[LIMITATIONS_TEXT],
+        evidence_count=len(state.get("evidence", [])),
     )
+    assessment = assess_compliance(
+        recommendation=decision.recommendation.value,
+        risk_level=decision.risk_level.value,
+        confidence=decision.confidence,
+        evidence_count=decision.evidence_count,
+        ticker_supported=_decision_supports_ticker(state),
+        portfolio_impact=_portfolio_impact(state),
+    )
+    if assessment.recommendation_override is not None:
+        decision.recommendation = Recommendation.NEEDS_MORE_ANALYSIS
+    decision.requires_approval = decision.requires_approval or assessment.approval_required
+    decision.approval_required_reason = assessment.approval_required_reason
+    decision.policy_flags = assessment.policy_flags
     if decision.requires_approval:
-        approval = approvals_service.create_approval_from_decision(decision)
+        approval = approvals_service.create_approval_from_decision(decision, user_id=user_id)
         decision.approval_id = approval.approval_id
     return ChatResponse(
         conversation_id=conversation_id,
@@ -286,3 +312,26 @@ def _to_response(
         used_tools=list(state.get("used_tools", [])),
         decision=decision,
     )
+
+
+def _demo_user() -> UserProfile:
+    return UserProfile(
+        id="usr_demo",
+        email="demo@alphalens.ai",
+        full_name="Demo User",
+        role="user",
+        plan="free",
+        is_active=True,
+    )
+
+
+def _decision_supports_ticker(state: AgentState) -> bool:
+    recommendation = str(state.get("recommendation", "inform"))
+    if recommendation in {"buy", "sell", "trim", "rebalance"}:
+        return bool(state.get("used_tools"))
+    return True
+
+
+def _portfolio_impact(state: AgentState) -> float | None:
+    impact = state.get("portfolio_impact")
+    return float(impact) if isinstance(impact, (int, float)) else None

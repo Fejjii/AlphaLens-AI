@@ -40,6 +40,7 @@ class ReportCreate(APIModel):
 
 class ReportResponse(APIModel):
     id: str
+    user_id: str
     title: str
     report_type: ReportType
     conversation_id: str | None = None
@@ -49,6 +50,11 @@ class ReportResponse(APIModel):
     sections: list[ReportSection] = Field(default_factory=list)
     evidence: list[EvidenceItem] = Field(default_factory=list)
     citations: list[str] = Field(default_factory=list)
+    disclaimer: str | None = None
+    limitations: list[str] = Field(default_factory=list)
+    evidence_count: int = 0
+    policy_flags: list[str] = Field(default_factory=list)
+    approval_required_reason: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
 

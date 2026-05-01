@@ -26,10 +26,11 @@ class MemoryService:
     def enabled(self) -> bool:
         return self._enabled
 
-    def get_history(self, conversation_id: str) -> dict[str, Any]:
+    def get_history(self, conversation_id: str, *, user_id: str | None = None) -> dict[str, Any]:
         if not self._enabled:
             return {"messages": [], "metadata": []}
-        return self._store.get_conversation(conversation_id) or {
+        key = _conversation_key(conversation_id, user_id=user_id)
+        return self._store.get_conversation(key) or {
             "messages": [],
             "metadata": [],
         }
@@ -38,33 +39,41 @@ class MemoryService:
         self,
         conversation_id: str,
         *,
+        user_id: str | None = None,
         user_message: dict[str, Any],
         assistant_message: dict[str, Any],
         metadata: dict[str, Any],
     ) -> None:
         if not self._enabled:
             return
-        state = self.get_history(conversation_id)
+        state = self.get_history(conversation_id, user_id=user_id)
         state.setdefault("messages", []).extend([user_message, assistant_message])
         state.setdefault("metadata", []).append(metadata)
-        self._store.save_conversation(conversation_id, state)
+        self._store.save_conversation(_conversation_key(conversation_id, user_id=user_id), state)
 
     def get_context_window(
         self,
         conversation_id: str,
         *,
+        user_id: str | None = None,
         max_messages: int = 10,
     ) -> list[dict[str, Any]]:
-        history = self.get_history(conversation_id)
+        history = self.get_history(conversation_id, user_id=user_id)
         messages = history.get("messages", [])
         if not isinstance(messages, list):
             return []
         return list(messages[-max_messages:])
 
-    def clear(self, conversation_id: str) -> None:
+    def clear(self, conversation_id: str, *, user_id: str | None = None) -> None:
         if not self._enabled:
             return
-        self._store.clear_conversation(conversation_id)
+        self._store.clear_conversation(_conversation_key(conversation_id, user_id=user_id))
+
+
+def _conversation_key(conversation_id: str, *, user_id: str | None) -> str:
+    if user_id is None:
+        return conversation_id
+    return f"{user_id}:{conversation_id}"
 
 
 def build_memory_store(settings: Settings) -> MemoryStore:

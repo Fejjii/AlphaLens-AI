@@ -34,7 +34,7 @@ def _build_chat_service(*, tmp_path: Path, memory_service: MemoryService) -> Cha
     )
 
 
-async def test_reports_api_create_list_get(client: AsyncClient) -> None:
+async def test_reports_api_create_list_get(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     response = await client.post(
         "/reports",
         json={
@@ -42,6 +42,7 @@ async def test_reports_api_create_list_get(client: AsyncClient) -> None:
             "prompt": "Should we increase NVDA exposure?",
             "ticker": "NVDA",
         },
+        headers=auth_headers,
     )
     assert response.status_code == 200
     body = response.json()
@@ -49,13 +50,13 @@ async def test_reports_api_create_list_get(client: AsyncClient) -> None:
     assert body["status"] == "generated"
     assert len(body["sections"]) >= 8
 
-    list_response = await client.get("/reports")
+    list_response = await client.get("/reports", headers=auth_headers)
     assert list_response.status_code == 200
     reports = list_response.json()
     assert len(reports) == 1
 
     report_id = body["id"]
-    get_response = await client.get(f"/reports/{report_id}")
+    get_response = await client.get(f"/reports/{report_id}", headers=auth_headers)
     assert get_response.status_code == 200
     assert get_response.json()["id"] == report_id
 
@@ -63,16 +64,18 @@ async def test_reports_api_create_list_get(client: AsyncClient) -> None:
     assert any(event.event_type == "report_generated" for event in usage_events)
 
 
-async def test_report_summary_endpoint(client: AsyncClient) -> None:
+async def test_report_summary_endpoint(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     await client.post(
         "/reports",
         json={"report_type": "investment_memo", "prompt": "Evaluate AAPL", "ticker": "AAPL"},
+        headers=auth_headers,
     )
     await client.post(
         "/reports",
         json={"report_type": "risk_review", "prompt": "Review concentration risk"},
+        headers=auth_headers,
     )
-    response = await client.get("/reports/summary")
+    response = await client.get("/reports/summary", headers=auth_headers)
     assert response.status_code == 200
     body = response.json()
     assert body["total_reports"] == 2
@@ -94,7 +97,8 @@ def test_report_service_uses_memory_evidence(tmp_path: Path) -> None:
             prompt="Summarize latest portfolio changes",
             conversation_id=response.conversation_id,
             source_response_id=response.response_id,
-        )
+        ),
+        user_id="usr_reports_memory",
     )
-    assert report.sections[0].key == "executive_summary"
+    assert report.sections[0].key == "disclaimer"
     assert isinstance(report.citations, list)

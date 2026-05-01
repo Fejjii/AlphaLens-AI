@@ -5,13 +5,13 @@ import { EmptyState } from "@/components/layout/EmptyState";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { api } from "@/lib/api";
+import { serverApi } from "@/lib/api.server";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function PortfolioPage() {
-  const portfolio = await api.portfolioSummary();
+  const portfolio = await serverApi.portfolioSummary();
   const cash = "0.00";
   const topWeight = Math.max(...portfolio.positions.map((position) => position.weight), 0);
   const watchlist = ["QQQ", "XLK", "JPM", "XOM"];

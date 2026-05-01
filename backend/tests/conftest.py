@@ -12,6 +12,8 @@ from alphalens.api.main import create_app
 @pytest.fixture
 async def client() -> AsyncIterator[AsyncClient]:
     deps._approval_repository.cache_clear()
+    deps._user_repository.cache_clear()
+    deps._auth_service.cache_clear()
     deps._chat_service.cache_clear()
     deps._approvals_service.cache_clear()
     deps._rag_service.cache_clear()
@@ -27,6 +29,7 @@ async def client() -> AsyncIterator[AsyncClient]:
     deps._report_repository.cache_clear()
     deps._scenarios_service.cache_clear()
     deps._scenario_repository.cache_clear()
+    deps._usage_service.cache_clear()
     deps._cache_service.cache_clear()
     deps._memory_service.cache_clear()
     app = create_app()
@@ -40,6 +43,8 @@ async def client() -> AsyncIterator[AsyncClient]:
     deps.get_approvals_service().reset()
     deps.get_usage_service().reset()
     deps._approval_repository.cache_clear()
+    deps._user_repository.cache_clear()
+    deps._auth_service.cache_clear()
     deps._chat_service.cache_clear()
     deps._approvals_service.cache_clear()
     deps._rag_service.cache_clear()
@@ -55,5 +60,30 @@ async def client() -> AsyncIterator[AsyncClient]:
     deps._report_repository.cache_clear()
     deps._scenarios_service.cache_clear()
     deps._scenario_repository.cache_clear()
+    deps._usage_service.cache_clear()
     deps._cache_service.cache_clear()
     deps._memory_service.cache_clear()
+
+
+@pytest.fixture
+async def auth_session(client: AsyncClient) -> dict[str, object]:
+    response = await client.post(
+        "/auth/register",
+        json={
+            "email": "test.user@example.com",
+            "password": "Password123!",
+            "full_name": "Test User",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    token = body["access_token"]
+    return {
+        "headers": {"Authorization": f"Bearer {token}"},
+        "user": body["user"],
+    }
+
+
+@pytest.fixture
+async def auth_headers(auth_session: dict[str, object]) -> dict[str, str]:
+    return auth_session["headers"]  # type: ignore[return-value]

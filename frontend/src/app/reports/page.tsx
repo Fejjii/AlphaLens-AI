@@ -193,6 +193,16 @@ export default function ReportsPage() {
 
                     {expanded && (
                       <div className="space-y-3 rounded-[0.875rem] border border-border/60 bg-card/60 p-3">
+                        {report.disclaimer && (
+                          <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100">
+                            {report.disclaimer}
+                          </div>
+                        )}
+                        {report.approval_required_reason && (
+                          <div className="text-xs text-muted-foreground">
+                            Approval reason: {report.approval_required_reason}
+                          </div>
+                        )}
                         {report.sections.map((section) => (
                           <div key={section.key} className="space-y-1">
                             <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
@@ -208,6 +218,9 @@ export default function ReportsPage() {
                             )}
                           </div>
                         ))}
+                        <div className="text-xs text-muted-foreground">
+                          Evidence items: {report.evidence_count ?? report.evidence.length}
+                        </div>
                       </div>
                     )}
                   </CardContent>

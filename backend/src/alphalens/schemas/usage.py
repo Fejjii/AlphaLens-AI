@@ -22,6 +22,7 @@ EventType = Literal[
     "feedback_submitted",
     "report_generated",
     "scenario_simulated",
+    "speech_uploaded",
 ]
 
 
@@ -32,6 +33,7 @@ class UsageEvent(BaseModel):
 
     usage_id: str
     created_at: datetime
+    user_id: str | None = None
     conversation_id: str | None = None
     event_type: EventType
     provider: str

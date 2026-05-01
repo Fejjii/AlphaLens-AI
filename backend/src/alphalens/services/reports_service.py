@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from alphalens.memory.service import MemoryService
+from alphalens.compliance.policy import DISCLAIMER_TEXT, LIMITATIONS_TEXT, assess_compliance
 from alphalens.repositories.reports import InMemoryReportRepository, ReportRepository
 from alphalens.schemas.agent import EvidenceItem
 from alphalens.schemas.report import (
@@ -31,7 +32,7 @@ class ReportsService:
         self._usage_service = usage_service
         self._memory_service = memory_service
 
-    def create_report(self, payload: ReportCreate) -> ReportResponse:
+    def create_report(self, payload: ReportCreate, *, user_id: str) -> ReportResponse:
         now = datetime.now(tz=UTC)
         report_id = f"rpt_{uuid.uuid4().hex[:12]}"
         title = payload.title or self._default_title(payload)
@@ -39,8 +40,16 @@ class ReportsService:
         evidence = self._resolve_evidence(memory_context)
         citations = self._resolve_citations(memory_context)
         sections = _build_sections(payload=payload, evidence=evidence, citations=citations)
+        assessment = assess_compliance(
+            recommendation="inform",
+            risk_level="low",
+            confidence=0.8 if evidence else 0.4,
+            evidence_count=len(evidence),
+            ticker_supported=bool(payload.ticker),
+        )
         report = ReportResponse(
             id=report_id,
+            user_id=user_id,
             title=title,
             report_type=payload.report_type,
             conversation_id=payload.conversation_id,
@@ -50,6 +59,11 @@ class ReportsService:
             sections=sections,
             evidence=evidence,
             citations=citations,
+            disclaimer=DISCLAIMER_TEXT,
+            limitations=[LIMITATIONS_TEXT, "This output is decision support, not financial advice."],
+            evidence_count=len(evidence),
+            policy_flags=assessment.policy_flags,
+            approval_required_reason=assessment.approval_required_reason,
             created_at=now,
             updated_at=now,
         )
@@ -58,6 +72,7 @@ class ReportsService:
             self._usage_service.record_event(
                 event_type="report_generated",
                 provider="reports_service",
+                user_id=user_id,
                 conversation_id=payload.conversation_id,
                 metadata={
                     "report_id": report_id,
@@ -67,14 +82,14 @@ class ReportsService:
             )
         return created
 
-    def list_reports(self) -> list[ReportResponse]:
-        return self._repository.list()
+    def list_reports(self, *, user_id: str) -> list[ReportResponse]:
+        return self._repository.list(user_id=user_id)
 
-    def get_report(self, report_id: str) -> ReportResponse | None:
-        return self._repository.get(report_id)
+    def get_report(self, report_id: str, *, user_id: str) -> ReportResponse | None:
+        return self._repository.get(report_id, user_id=user_id)
 
-    def summarize_reports(self) -> ReportSummary:
-        reports = self._repository.list()
+    def summarize_reports(self, *, user_id: str) -> ReportSummary:
+        reports = self._repository.list(user_id=user_id)
         counts = Counter(report.report_type.value for report in reports)
         return ReportSummary(
             total_reports=len(reports),
@@ -135,6 +150,12 @@ def _build_sections(
         ]
     citation_lines = citations or ["No tool citations captured for this context."]
     return [
+        ReportSection(
+            key="disclaimer",
+            title="Disclaimer",
+            content=DISCLAIMER_TEXT,
+            bullets=["Decision support only.", "Not a recommendation to trade or execute."],
+        ),
         ReportSection(
             key="executive_summary",
             title="Executive Summary",
@@ -202,6 +223,7 @@ def _build_sections(
             bullets=[
                 "No live execution or trade routing.",
                 f"Linked tool context: {', '.join(citation_lines)}",
+                "This is not financial advice.",
             ],
         ),
     ]

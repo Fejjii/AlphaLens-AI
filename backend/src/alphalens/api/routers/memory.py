@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from alphalens.api.deps import MemoryServiceDep
+from alphalens.api.deps import CurrentUserDep, MemoryServiceDep
 from alphalens.schemas.memory import ConversationMemory, MemoryClearResponse, MemoryMessage
 
 router = APIRouter(prefix="/memory", tags=["memory"])
@@ -14,8 +14,9 @@ router = APIRouter(prefix="/memory", tags=["memory"])
 def get_memory(
     conversation_id: str,
     service: MemoryServiceDep,
+    current_user: CurrentUserDep,
 ) -> ConversationMemory:
-    history = service.get_history(conversation_id)
+    history = service.get_history(conversation_id, user_id=current_user.id)
     messages = [
         MemoryMessage(
             role=str(message.get("role", "")),
@@ -35,6 +36,7 @@ def get_memory(
 def clear_memory(
     conversation_id: str,
     service: MemoryServiceDep,
+    current_user: CurrentUserDep,
 ) -> MemoryClearResponse:
-    service.clear(conversation_id)
+    service.clear(conversation_id, user_id=current_user.id)
     return MemoryClearResponse(conversation_id=conversation_id)

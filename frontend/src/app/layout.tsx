@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 
+import { AuthGuard } from "@/components/auth/AuthGuard";
+import { AuthProvider } from "@/components/auth/AuthProvider";
 import { AppShell } from "@/components/layout/AppShell";
 
 import "./globals.css";
@@ -17,7 +19,11 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <body className="min-h-screen bg-background text-foreground">
-        <AppShell>{children}</AppShell>
+        <AuthProvider>
+          <AuthGuard>
+            <AppShell>{children}</AppShell>
+          </AuthGuard>
+        </AuthProvider>
       </body>
     </html>
   );

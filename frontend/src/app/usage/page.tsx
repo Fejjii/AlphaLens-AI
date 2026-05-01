@@ -13,7 +13,7 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
-import type { FeedbackSummary, UsageEvent, UsageSummary } from "@/types/api";
+import type { FeedbackSummary, PlanUsage, UsageEvent, UsageSummary } from "@/types/api";
 
 function formatCost(value: number): string {
   return `$${value.toFixed(4)}`;
@@ -50,6 +50,7 @@ export default function UsagePage() {
   const [summary, setSummary] = useState<UsageSummary | null>(null);
   const [events, setEvents] = useState<UsageEvent[]>([]);
   const [feedbackSummary, setFeedbackSummary] = useState<FeedbackSummary | null>(null);
+  const [planUsage, setPlanUsage] = useState<PlanUsage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,12 +59,18 @@ export default function UsagePage() {
     setLoading(true);
     setError(null);
 
-    Promise.all([api.fetchUsageSummary(), api.fetchUsageEvents(), api.fetchFeedbackSummary()])
-      .then(([summaryData, eventsData, feedbackData]) => {
+    Promise.all([
+      api.fetchUsageSummary(),
+      api.fetchUsageEvents(),
+      api.fetchFeedbackSummary(),
+      api.fetchMyPlanUsage(),
+    ])
+      .then(([summaryData, eventsData, feedbackData, planUsageData]) => {
         if (cancelled) return;
         setSummary(summaryData);
         setEvents(eventsData);
         setFeedbackSummary(feedbackData);
+        setPlanUsage(planUsageData);
       })
       .catch(() => {
         if (!cancelled) setError("Unable to load usage data right now.");
@@ -180,6 +187,48 @@ export default function UsagePage() {
               hint="Response ratings captured from chat"
             />
           </div>
+          {planUsage && (
+            <div className="mt-6 grid gap-4 lg:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Monthly quota usage</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {Object.entries(planUsage.monthly_usage).map(([key, value]) => (
+                    <div
+                      key={key}
+                      className="flex items-center justify-between rounded-[0.875rem] border border-border/60 bg-background/45 px-3 py-2.5 text-sm"
+                    >
+                      <span className="capitalize text-muted-foreground">{key.replaceAll("_", " ")}</span>
+                      <span className="tabular">{String(value)}</span>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Plan features</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="text-sm text-muted-foreground">
+                    Enabled tools and models for your current plan.
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {planUsage.capabilities.tools.map((tool) => (
+                      <Badge key={tool} variant="muted">
+                        {tool}
+                      </Badge>
+                    ))}
+                    {planUsage.capabilities.models.map((modelName) => (
+                      <Badge key={modelName} variant="outline">
+                        {modelName}
+                      </Badge>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
           <div className="mt-6 grid gap-4 lg:grid-cols-[1.4fr_0.9fr]">
             <Card>

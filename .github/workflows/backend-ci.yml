@@ -1,0 +1,65 @@
+name: Backend CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_ENV: test
+      APP_VERSION: 0.1.0
+      LOG_LEVEL: WARNING
+      DATABASE_URL: sqlite:///./test.db
+      APP_DATABASE_URL: sqlite:///./test.db
+      REDIS_URL: redis://localhost:6379/0
+      QDRANT_URL: http://localhost:6333
+      PERSISTENCE_BACKEND: in_memory
+      MEMORY_BACKEND: in_memory
+      RATE_LIMIT_BACKEND: memory
+      LLM_ENABLED: "false"
+      SPEECH_ENABLED: "false"
+      MARKET_DATA_PROVIDER: fallback
+      SEARCH_PROVIDER: fallback
+      MACRO_DATA_PROVIDER: fallback
+      SEC_PROVIDER: fallback
+      OPENAI_API_KEY: ci-placeholder
+      SERPER_API_KEY: ci-placeholder
+      FRED_API_KEY: ci-placeholder
+      ALPHA_VANTAGE_API_KEY: ci-placeholder
+      SEC_USER_AGENT: AlphaLens CI ci@example.com
+      NEXT_PUBLIC_API_URL: /api/backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: backend/pyproject.toml
+          cache: uv
+
+      - name: Sync backend dependencies
+        run: uv sync --extra dev
+
+      - name: Run backend tests
+        run: uv run pytest
+
+      - name: Run backend lint
+        run: uv run ruff check .
+
+      - name: Run backend type checks
+        run: uv run mypy src

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from alphalens.repositories.scenarios import InMemoryScenarioRepository, ScenarioRepository
+from alphalens.compliance.policy import DISCLAIMER_TEXT, LIMITATIONS_TEXT, assess_compliance
 from alphalens.schemas.scenario import (
     ScenarioCreate,
     ScenarioImpactItem,
@@ -34,27 +35,28 @@ class ScenariosService:
         self._repository = repository or InMemoryScenarioRepository()
         self._usage_service = usage_service
 
-    def create_scenario(self, payload: ScenarioCreate) -> ScenarioResponse:
+    def create_scenario(self, payload: ScenarioCreate, *, user_id: str) -> ScenarioResponse:
         holdings = load_holdings(_resolve_holdings_path())
         if not holdings:
             raise ValueError("No synthetic holdings available for scenario simulation.")
 
         if payload.scenario_type == ScenarioType.PRICE_SHOCK:
-            result = _run_price_shock(payload, holdings)
+            result = _run_price_shock(payload, holdings, user_id=user_id)
         elif payload.scenario_type == ScenarioType.SECTOR_SHOCK:
-            result = _run_sector_shock(payload, holdings)
+            result = _run_sector_shock(payload, holdings, user_id=user_id)
         elif payload.scenario_type == ScenarioType.RATE_SHOCK:
-            result = _run_rate_shock(payload, holdings)
+            result = _run_rate_shock(payload, holdings, user_id=user_id)
         elif payload.scenario_type == ScenarioType.FX_SHOCK:
-            result = _run_fx_shock(payload, holdings)
+            result = _run_fx_shock(payload, holdings, user_id=user_id)
         else:
-            result = _run_rebalance(payload, holdings)
+            result = _run_rebalance(payload, holdings, user_id=user_id)
 
         created = self._repository.create(result)
         if self._usage_service is not None:
             self._usage_service.record_event(
                 event_type="scenario_simulated",
                 provider="scenario_service",
+                user_id=user_id,
                 metadata={
                     "scenario_id": created.id,
                     "scenario_type": created.scenario_type.value,
@@ -63,14 +65,14 @@ class ScenariosService:
             )
         return created
 
-    def list_scenarios(self) -> list[ScenarioResponse]:
-        return self._repository.list()
+    def list_scenarios(self, *, user_id: str) -> list[ScenarioResponse]:
+        return self._repository.list(user_id=user_id)
 
-    def get_scenario(self, scenario_id: str) -> ScenarioResponse | None:
-        return self._repository.get(scenario_id)
+    def get_scenario(self, scenario_id: str, *, user_id: str) -> ScenarioResponse | None:
+        return self._repository.get(scenario_id, user_id=user_id)
 
-    def summarize_scenarios(self) -> ScenarioSummary:
-        scenarios = self._repository.list()
+    def summarize_scenarios(self, *, user_id: str) -> ScenarioSummary:
+        scenarios = self._repository.list(user_id=user_id)
         counts = Counter(item.scenario_type.value for item in scenarios)
         return ScenarioSummary(
             total_scenarios=len(scenarios),
@@ -83,7 +85,12 @@ class ScenariosService:
             clear()
 
 
-def _run_price_shock(payload: ScenarioCreate, holdings: list[Holding]) -> ScenarioResponse:
+def _run_price_shock(
+    payload: ScenarioCreate,
+    holdings: list[Holding],
+    *,
+    user_id: str,
+) -> ScenarioResponse:
     ticker = (payload.ticker or "").strip().upper()
     shock = payload.shock_percent if payload.shock_percent is not None else DEFAULT_PRICE_SHOCK
     impacted = [
@@ -96,6 +103,7 @@ def _run_price_shock(payload: ScenarioCreate, holdings: list[Holding]) -> Scenar
     return _build_response(
         payload=payload,
         title=payload.title or f"Price shock · {ticker or 'single position'}",
+        user_id=user_id,
         affected_holdings=impacted,
         assumptions=_merge_assumptions(
             payload.assumptions,
@@ -104,7 +112,12 @@ def _run_price_shock(payload: ScenarioCreate, holdings: list[Holding]) -> Scenar
     )
 
 
-def _run_sector_shock(payload: ScenarioCreate, holdings: list[Holding]) -> ScenarioResponse:
+def _run_sector_shock(
+    payload: ScenarioCreate,
+    holdings: list[Holding],
+    *,
+    user_id: str,
+) -> ScenarioResponse:
     sector = (payload.sector or "").strip().lower()
     shock = payload.shock_percent if payload.shock_percent is not None else DEFAULT_SECTOR_SHOCK
     matching = [holding for holding in holdings if sector and sector in holding.sector.lower()]
@@ -114,6 +127,7 @@ def _run_sector_shock(payload: ScenarioCreate, holdings: list[Holding]) -> Scena
     return _build_response(
         payload=payload,
         title=payload.title or f"Sector shock · {payload.sector or 'AI-linked basket'}",
+        user_id=user_id,
         affected_holdings=impacted,
         assumptions=_merge_assumptions(
             payload.assumptions,
@@ -125,7 +139,12 @@ def _run_sector_shock(payload: ScenarioCreate, holdings: list[Holding]) -> Scena
     )
 
 
-def _run_rate_shock(payload: ScenarioCreate, holdings: list[Holding]) -> ScenarioResponse:
+def _run_rate_shock(
+    payload: ScenarioCreate,
+    holdings: list[Holding],
+    *,
+    user_id: str,
+) -> ScenarioResponse:
     rate_bps = payload.rate_bps if payload.rate_bps is not None else DEFAULT_RATE_BPS
     total_value = sum(item.market_value for item in holdings)
     duration_proxy = 0.035  # deterministic sensitivity proxy
@@ -142,6 +161,7 @@ def _run_rate_shock(payload: ScenarioCreate, holdings: list[Holding]) -> Scenari
     return _build_response(
         payload=payload,
         title=payload.title or f"Rate shock · {rate_bps} bps",
+        user_id=user_id,
         affected_holdings=[portfolio_item],
         assumptions=_merge_assumptions(
             payload.assumptions,
@@ -153,7 +173,12 @@ def _run_rate_shock(payload: ScenarioCreate, holdings: list[Holding]) -> Scenari
     )
 
 
-def _run_fx_shock(payload: ScenarioCreate, holdings: list[Holding]) -> ScenarioResponse:
+def _run_fx_shock(
+    payload: ScenarioCreate,
+    holdings: list[Holding],
+    *,
+    user_id: str,
+) -> ScenarioResponse:
     currency = (payload.currency or "USD").upper()
     shock = payload.shock_percent if payload.shock_percent is not None else DEFAULT_FX_SHOCK
     total_value = sum(item.market_value for item in holdings)
@@ -171,6 +196,7 @@ def _run_fx_shock(payload: ScenarioCreate, holdings: list[Holding]) -> ScenarioR
     return _build_response(
         payload=payload,
         title=payload.title or f"FX shock · {currency}",
+        user_id=user_id,
         affected_holdings=[portfolio_item],
         assumptions=_merge_assumptions(
             payload.assumptions,
@@ -182,7 +208,12 @@ def _run_fx_shock(payload: ScenarioCreate, holdings: list[Holding]) -> ScenarioR
     )
 
 
-def _run_rebalance(payload: ScenarioCreate, holdings: list[Holding]) -> ScenarioResponse:
+def _run_rebalance(
+    payload: ScenarioCreate,
+    holdings: list[Holding],
+    *,
+    user_id: str,
+) -> ScenarioResponse:
     total_value = sum(item.market_value for item in holdings)
     current_weights = {
         holding.symbol: holding.market_value / total_value for holding in holdings
@@ -209,6 +240,7 @@ def _run_rebalance(payload: ScenarioCreate, holdings: list[Holding]) -> Scenario
     return _build_response(
         payload=payload,
         title=payload.title or "Rebalance impact summary",
+        user_id=user_id,
         affected_holdings=impacted,
         assumptions=_merge_assumptions(
             payload.assumptions,
@@ -237,6 +269,7 @@ def _build_response(
     *,
     payload: ScenarioCreate,
     title: str,
+    user_id: str,
     affected_holdings: list[ScenarioImpactItem],
     assumptions: list[str],
 ) -> ScenarioResponse:
@@ -249,6 +282,7 @@ def _build_response(
     )
     return ScenarioResponse(
         id=f"scn_{uuid.uuid4().hex[:12]}",
+        user_id=user_id,
         title=title,
         scenario_type=payload.scenario_type,
         ticker=payload.ticker.upper() if payload.ticker else None,
@@ -261,7 +295,12 @@ def _build_response(
         affected_holdings=affected_holdings,
         risk_level=risk_level,
         recommendation=recommendation,
-        approval_required=risk_level in {"high", "critical"},
+        approval_required=(risk_level in {"high", "critical"}) or payload.scenario_type in {ScenarioType.REBALANCE},
+        disclaimer=DISCLAIMER_TEXT,
+        limitations=[LIMITATIONS_TEXT, "Scenario outputs are not forecasts or guarantees."],
+        evidence_count=len(assumptions),
+        policy_flags=[],
+        approval_required_reason="high_risk_level" if risk_level in {"high", "critical"} else None,
         created_at=datetime.now(tz=UTC),
     )
 

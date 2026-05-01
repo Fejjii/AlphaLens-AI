@@ -1,0 +1,69 @@
+services:
+  - type: web
+    name: alphalens-backend
+    env: python
+    rootDir: backend
+    buildCommand: uv sync --extra dev
+    startCommand: uv run python -m alphalens.api.serve
+    envVars:
+      - key: APP_ENV
+        value: prod
+      - key: LOG_LEVEL
+        value: INFO
+      - key: APP_VERSION
+        value: 0.1.0
+      - key: PERSISTENCE_BACKEND
+        value: postgres
+      - key: MEMORY_BACKEND
+        value: redis
+      - key: RATE_LIMIT_BACKEND
+        value: redis
+      - key: MARKET_DATA_PROVIDER
+        value: fallback
+      - key: SEARCH_PROVIDER
+        value: fallback
+      - key: MACRO_DATA_PROVIDER
+        value: fallback
+      - key: SEC_PROVIDER
+        value: fallback
+      - key: LLM_ENABLED
+        value: "false"
+      - key: SPEECH_ENABLED
+        value: "false"
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: RATE_LIMIT_REDIS_URL
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SERPER_API_KEY
+        sync: false
+      - key: FRED_API_KEY
+        sync: false
+      - key: ALPHA_VANTAGE_API_KEY
+        sync: false
+      - key: SEC_USER_AGENT
+        value: AlphaLens production contact@example.com
+      - key: CORS_ALLOW_ORIGINS
+        sync: false
+  - type: web
+    name: alphalens-frontend
+    env: node
+    rootDir: frontend
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        value: /api/backend
+      - key: BACKEND_INTERNAL_URL
+        sync: false

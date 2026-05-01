@@ -37,10 +37,31 @@ class Settings(BaseSettings):
     app_version: str = Field(default="0.1.0", alias="APP_VERSION")
     app_env: Environment = Field(default="dev", alias="APP_ENV")
     log_level: LogLevel = Field(default="INFO", alias="LOG_LEVEL")
+    auth_secret_key: str = Field(
+        default="alphalens-dev-jwt-secret-change-me",
+        alias="AUTH_SECRET_KEY",
+    )
+    auth_algorithm: str = Field(default="HS256", alias="AUTH_ALGORITHM")
+    auth_access_token_expire_minutes: int = Field(
+        default=60,
+        gt=0,
+        alias="AUTH_ACCESS_TOKEN_EXPIRE_MINUTES",
+    )
+    auth_refresh_token_expire_days: int = Field(default=14, gt=0, alias="AUTH_REFRESH_TOKEN_EXPIRE_DAYS")
 
     database_url: str | None = Field(default=None, alias="DATABASE_URL")
     app_database_url: str | None = Field(default=None, alias="APP_DATABASE_URL")
     redis_url: str | None = Field(default=None, alias="REDIS_URL")
+    rate_limit_backend: Literal["memory", "redis"] = Field(default="memory", alias="RATE_LIMIT_BACKEND")
+    rate_limit_redis_url: str | None = Field(default=None, alias="RATE_LIMIT_REDIS_URL")
+    rate_limit_window_seconds: int = Field(default=60, gt=0, alias="RATE_LIMIT_WINDOW_SECONDS")
+    rate_limit_auth_login: int = Field(default=10, gt=0, alias="RATE_LIMIT_AUTH_LOGIN")
+    rate_limit_auth_register: int = Field(default=5, gt=0, alias="RATE_LIMIT_AUTH_REGISTER")
+    rate_limit_chat: int = Field(default=60, gt=0, alias="RATE_LIMIT_CHAT")
+    rate_limit_speech: int = Field(default=10, gt=0, alias="RATE_LIMIT_SPEECH")
+    rate_limit_reports: int = Field(default=20, gt=0, alias="RATE_LIMIT_REPORTS")
+    rate_limit_scenarios: int = Field(default=20, gt=0, alias="RATE_LIMIT_SCENARIOS")
+    rate_limit_feedback: int = Field(default=30, gt=0, alias="RATE_LIMIT_FEEDBACK")
     qdrant_url: str | None = Field(default=None, alias="QDRANT_URL")
 
     knowledge_base_path: str = Field(
@@ -102,9 +123,7 @@ class Settings(BaseSettings):
         alias="SEC_USER_AGENT",
     )
 
-    cors_allow_origins: list[str] = Field(
-        default_factory=lambda: ["http://localhost:3000"]
-    )
+    cors_allow_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"], alias="CORS_ALLOW_ORIGINS")
 
     # Caching (Redis-backed when configured, in-memory otherwise).
     # `redis_url` is shared with the existing infrastructure setting above.
@@ -135,6 +154,10 @@ class Settings(BaseSettings):
     @property
     def is_dev(self) -> bool:
         return self.app_env == "dev"
+
+    @property
+    def docs_public_enabled(self) -> bool:
+        return self.app_env in {"dev", "test"}
 
 
 @lru_cache(maxsize=1)

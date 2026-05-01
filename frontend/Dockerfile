@@ -7,6 +7,8 @@ RUN pnpm install --frozen-lockfile || pnpm install
 FROM node:20-alpine AS builder
 WORKDIR /app
 RUN corepack enable
+ARG NEXT_STANDALONE=true
+ENV NEXT_STANDALONE=${NEXT_STANDALONE}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm build

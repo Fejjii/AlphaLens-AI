@@ -244,8 +244,8 @@ def test_agent_flow_records_usage(tmp_path: Path, kb_dir: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_usage_summary_endpoint(client) -> None:
-    response = await client.get("/usage/summary")
+async def test_usage_summary_endpoint(client, auth_headers: dict[str, str]) -> None:
+    response = await client.get("/usage/summary", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "total_events" in data
@@ -255,28 +255,29 @@ async def test_usage_summary_endpoint(client) -> None:
 
 
 @pytest.mark.anyio
-async def test_usage_events_endpoint(client) -> None:
-    response = await client.get("/usage/events")
+async def test_usage_events_endpoint(client, auth_headers: dict[str, str]) -> None:
+    response = await client.get("/usage/events", headers=auth_headers)
     assert response.status_code == 200
     assert isinstance(response.json(), list)
 
 
 @pytest.mark.anyio
-async def test_usage_records_after_chat(client) -> None:
+async def test_usage_records_after_chat(client, auth_headers: dict[str, str]) -> None:
     # Trigger a chat so events are recorded.
     await client.post(
         "/agent/chat",
         json={"messages": [{"role": "user", "content": "Show me my portfolio."}]},
+        headers=auth_headers,
     )
 
-    summary_resp = await client.get("/usage/summary")
+    summary_resp = await client.get("/usage/summary", headers=auth_headers)
     assert summary_resp.status_code == 200
     summary = summary_resp.json()
     assert summary["total_events"] > 0
     assert summary["llm_calls"] >= 1
     assert summary["tool_calls"] >= 1
 
-    events_resp = await client.get("/usage/events")
+    events_resp = await client.get("/usage/events", headers=auth_headers)
     assert events_resp.status_code == 200
     events = events_resp.json()
     assert len(events) == summary["total_events"]

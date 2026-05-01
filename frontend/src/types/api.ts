@@ -46,6 +46,7 @@ export interface PortfolioSummary {
 export type Recommendation =
   | "inform"
   | "hold"
+  | "needs_more_analysis"
   | "buy"
   | "sell"
   | "trim"
@@ -75,6 +76,7 @@ export interface EvidenceItem {
 
 export interface Approval {
   approval_id: string;
+  user_id: string;
   created_at: string;
   status: ApprovalStatus;
   action_type: ApprovalActionType;
@@ -120,10 +122,15 @@ export interface AgentDecision {
   recommendation: Recommendation;
   reasoning: string[];
   evidence: EvidenceItem[];
+  disclaimer?: string | null;
+  limitations?: string[];
   requires_approval: boolean;
   approval_id?: string | null;
   risk_level: RiskLevel;
   confidence: number;
+  evidence_count?: number;
+  approval_required_reason?: string | null;
+  policy_flags?: string[];
 }
 
 export interface ChatRequest {
@@ -160,6 +167,7 @@ export type UsageEventType =
 export interface UsageEvent {
   usage_id: string;
   created_at: string;
+  user_id?: string | null;
   conversation_id?: string | null;
   event_type: UsageEventType;
   provider: string;
@@ -194,7 +202,59 @@ export interface FeedbackCreate {
 
 export interface FeedbackResponse extends FeedbackCreate {
   id: string;
+  user_id: string;
   created_at: string;
+}
+
+export type UserRole = "user" | "admin" | "reviewer";
+export type UserPlan = "free" | "pro" | "team";
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  full_name: string;
+  role: UserRole;
+  plan: UserPlan;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  refresh_token?: string | null;
+  token_type: "bearer";
+  expires_in: number;
+  user: UserProfile;
+}
+
+export interface PlanLimits {
+  monthly_chats?: number | null;
+  monthly_reports?: number | null;
+  monthly_scenarios?: number | null;
+  monthly_speech_uploads?: number | null;
+  monthly_estimated_cost_usd?: number | null;
+}
+
+export interface PlanCapabilities {
+  tools: string[];
+  models: string[];
+}
+
+export interface PlanResponse {
+  plan: UserPlan;
+  limits: PlanLimits;
+  capabilities: PlanCapabilities;
+  description: string;
+}
+
+export interface PlanUsage {
+  plan: UserPlan;
+  monthly_usage: Record<string, number>;
+  remaining_quota: Record<string, number | null>;
+  limits: PlanLimits;
+  capabilities: PlanCapabilities;
+  current_month: string;
 }
 
 export interface FeedbackSummary {
@@ -225,6 +285,7 @@ export interface ReportCreate {
 
 export interface ReportResponse {
   id: string;
+  user_id: string;
   title: string;
   report_type: ReportType;
   conversation_id?: string | null;
@@ -234,6 +295,11 @@ export interface ReportResponse {
   sections: ReportSection[];
   evidence: EvidenceItem[];
   citations: string[];
+  disclaimer?: string | null;
+  limitations?: string[];
+  evidence_count?: number;
+  policy_flags?: string[];
+  approval_required_reason?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -273,6 +339,7 @@ export interface ScenarioCreate {
 
 export interface ScenarioResponse {
   id: string;
+  user_id: string;
   title: string;
   scenario_type: ScenarioType;
   ticker?: string | null;
@@ -286,6 +353,11 @@ export interface ScenarioResponse {
   risk_level: string;
   recommendation: string;
   approval_required: boolean;
+  disclaimer?: string | null;
+  limitations?: string[];
+  evidence_count?: number;
+  policy_flags?: string[];
+  approval_required_reason?: string | null;
   created_at: string;
 }
 

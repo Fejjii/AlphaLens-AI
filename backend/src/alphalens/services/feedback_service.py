@@ -19,9 +19,10 @@ class FeedbackService:
         self._repository = repository or InMemoryFeedbackRepository()
         self._usage_service = usage_service
 
-    def create_feedback(self, payload: FeedbackCreate) -> FeedbackRecord:
+    def create_feedback(self, payload: FeedbackCreate, *, user_id: str) -> FeedbackRecord:
         record = FeedbackRecord(
             id=f"fdb_{uuid.uuid4().hex[:12]}",
+            user_id=user_id,
             conversation_id=payload.conversation_id,
             message_id=payload.message_id,
             response_id=payload.response_id,
@@ -34,6 +35,7 @@ class FeedbackService:
             self._usage_service.record_event(
                 event_type="feedback_submitted",
                 provider="frontend",
+                user_id=user_id,
                 conversation_id=record.conversation_id,
                 metadata={
                     "feedback_id": record.id,
@@ -43,11 +45,11 @@ class FeedbackService:
             )
         return created
 
-    def list_feedback(self) -> list[FeedbackRecord]:
-        return self._repository.list()
+    def list_feedback(self, *, user_id: str) -> list[FeedbackRecord]:
+        return self._repository.list(user_id=user_id)
 
-    def summarize_feedback(self) -> FeedbackSummary:
-        records = self._repository.list()
+    def summarize_feedback(self, *, user_id: str) -> FeedbackSummary:
+        records = self._repository.list(user_id=user_id)
         ratings = Counter(record.rating.value for record in records)
         categories = Counter(
             record.category.value for record in records if record.category is not None

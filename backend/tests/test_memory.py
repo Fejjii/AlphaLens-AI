@@ -67,17 +67,19 @@ class _CapturingGraph:
 
 async def test_first_chat_creates_conversation_id_and_persists_memory(
     client: AsyncClient,
+    auth_headers: dict[str, str],
 ) -> None:
     response = await client.post(
         "/agent/chat",
         json={"messages": [{"role": "user", "content": "How is my portfolio doing?"}]},
+        headers=auth_headers,
     )
     assert response.status_code == 200
     body = response.json()
     conversation_id = body["conversation_id"]
     assert conversation_id.startswith("conv_")
 
-    memory_response = await client.get(f"/memory/{conversation_id}")
+    memory_response = await client.get(f"/memory/{conversation_id}", headers=auth_headers)
     assert memory_response.status_code == 200
     memory_body = memory_response.json()
     assert memory_body["conversation_id"] == conversation_id
@@ -87,18 +89,22 @@ async def test_first_chat_creates_conversation_id_and_persists_memory(
     assert len(memory_body["metadata"]) == 1
 
 
-async def test_memory_can_be_cleared_via_api(client: AsyncClient) -> None:
+async def test_memory_can_be_cleared_via_api(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
     response = await client.post(
         "/agent/chat",
         json={"messages": [{"role": "user", "content": "Tell me about NVDA."}]},
+        headers=auth_headers,
     )
     conversation_id = response.json()["conversation_id"]
 
-    clear_response = await client.delete(f"/memory/{conversation_id}")
+    clear_response = await client.delete(f"/memory/{conversation_id}", headers=auth_headers)
     assert clear_response.status_code == 200
     assert clear_response.json() == {"conversation_id": conversation_id, "cleared": True}
 
-    memory_response = await client.get(f"/memory/{conversation_id}")
+    memory_response = await client.get(f"/memory/{conversation_id}", headers=auth_headers)
     assert memory_response.status_code == 200
     assert memory_response.json()["messages"] == []
     assert memory_response.json()["metadata"] == []

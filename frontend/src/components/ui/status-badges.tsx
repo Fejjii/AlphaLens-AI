@@ -24,6 +24,7 @@ const RECOMMENDATION_VARIANT: Record<Recommendation, BadgeVariant> = {
   escalate: "danger",
   hold: "muted",
   inform: "muted",
+  needs_more_analysis: "warning",
 };
 
 const APPROVAL_STATUS_VARIANT: Record<ApprovalStatus, BadgeVariant> = {

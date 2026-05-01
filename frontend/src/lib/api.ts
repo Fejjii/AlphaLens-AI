@@ -15,6 +15,10 @@ import type {
   ScenarioResponse,
   ScenarioSummary,
   TranscriptionResult,
+  TokenResponse,
+  UserProfile,
+  PlanResponse,
+  PlanUsage,
   UsageEvent,
   UsageSummary,
 } from "@/types/api";
@@ -51,6 +55,7 @@ async function request<T>(
     const response = await fetch(`${API_URL}${path}`, {
       ...init,
       signal: controller.signal,
+      credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
@@ -72,7 +77,10 @@ async function request<T>(
 async function withFallback<T>(promise: Promise<T>, fallback: T): Promise<T> {
   try {
     return await promise;
-  } catch {
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+      throw error;
+    }
     return fallback;
   }
 }
@@ -113,6 +121,22 @@ export const api = {
   decideApproval,
   fetchUsageSummary,
   fetchUsageEvents,
+  register: (payload: { email: string; password: string; full_name: string }) =>
+    request<TokenResponse>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  login: (payload: { email: string; password: string }) =>
+    request<TokenResponse>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  refresh: () => request<TokenResponse>("/auth/refresh", { method: "POST" }),
+  logout: () => request<{ logged_out: boolean }>("/auth/logout", { method: "POST" }),
+  me: () => request<UserProfile>("/auth/me"),
+  fetchPlans: () => request<PlanResponse[]>("/plans"),
+  fetchMyPlan: () => request<PlanResponse>("/plans/me"),
+  fetchMyPlanUsage: () => request<PlanUsage>("/plans/usage"),
   submitFeedback: (payload: FeedbackCreate) =>
     request<FeedbackResponse>("/feedback", {
       method: "POST",

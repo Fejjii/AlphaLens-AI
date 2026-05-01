@@ -3,13 +3,16 @@ from __future__ import annotations
 from httpx import AsyncClient
 
 
-async def test_agent_chat_returns_assistant_message(client: AsyncClient) -> None:
+async def test_agent_chat_returns_assistant_message(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
     payload = {
         "messages": [
             {"role": "user", "content": "How is my portfolio doing today?"}
         ]
     }
-    response = await client.post("/agent/chat", json=payload)
+    response = await client.post("/agent/chat", json=payload, headers=auth_headers)
     assert response.status_code == 200
     body = response.json()
     assert body["conversation_id"].startswith("conv_")
@@ -32,21 +35,27 @@ async def test_agent_chat_returns_assistant_message(client: AsyncClient) -> None
     assert 0.0 <= decision["confidence"] <= 1.0
 
 
-async def test_chat_alias_matches_agent_chat_contract(client: AsyncClient) -> None:
+async def test_chat_alias_matches_agent_chat_contract(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
     payload = {
         "messages": [
             {"role": "user", "content": "Give me a concise market update."}
         ]
     }
-    response = await client.post("/chat", json=payload)
+    response = await client.post("/chat", json=payload, headers=auth_headers)
     assert response.status_code == 200
     body = response.json()
     assert body["conversation_id"].startswith("conv_")
     assert body["message"]["role"] == "assistant"
 
 
-async def test_agent_chat_validation_error(client: AsyncClient) -> None:
-    response = await client.post("/agent/chat", json={"messages": []})
+async def test_agent_chat_validation_error(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await client.post("/agent/chat", json={"messages": []}, headers=auth_headers)
     assert response.status_code == 422
     body = response.json()
     assert body["code"] == "validation_failed"

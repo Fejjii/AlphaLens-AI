@@ -7,16 +7,16 @@ import { UsageMetricCard } from "@/components/cards/UsageMetricCard";
 import { EmptyState } from "@/components/layout/EmptyState";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { api } from "@/lib/api";
+import { serverApi } from "@/lib/api.server";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const [portfolio, approvals, usageSummary] = await Promise.all([
-    api.portfolioSummary(),
-    api.approvals(),
-    api.fetchUsageSummary(),
+    serverApi.portfolioSummary(),
+    serverApi.approvals(),
+    serverApi.fetchUsageSummary(),
   ]);
 
   const sharpe = portfolio.risk_metrics.find((m) => m.name === "sharpe");
