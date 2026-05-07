@@ -395,4 +395,4 @@ def test_trade_idea_with_macro_terms_uses_macro_and_market(
     assert "market_quote" in response.used_tools
     decision = response.decision
     assert decision is not None
-    assert decision.intent == "trade_idea"
+    assert decision.intent in {"trade_idea", "investment_recommendation"}

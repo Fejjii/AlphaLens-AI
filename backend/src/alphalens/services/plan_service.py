@@ -69,7 +69,25 @@ PLAN_REGISTRY: dict[PlanName, _PlanConfig] = {
 
 
 class PlanAccessError(Exception):
-    pass
+    """Raised when a plan quota would be exceeded; mapped to HTTP 429 by the API layer."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        feature: PlanMetric,
+        plan: PlanName,
+        limit: int | float | None,
+        used: int | float,
+        reset_at: str,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.feature = feature
+        self.plan = plan
+        self.limit = limit
+        self.used = used
+        self.reset_at = reset_at
 
 
 class PlanService:
@@ -128,16 +146,28 @@ class PlanService:
             limits=plan.limits,
             capabilities=plan.capabilities,
             current_month=_month_key(),
+            quota_reset_at=_quota_reset_at_iso(),
         )
 
     def ensure_usage_allowed(self, user: UserProfile, metric: PlanMetric) -> None:
+        if self._settings.app_env == "dev" and self._settings.dev_bypass_quotas:
+            return
         plan = self.get_current_plan(user)
         usage = self.usage(user)
         limit = getattr(plan.limits, f"monthly_{metric}")
         used = usage.monthly_usage[metric]
         if limit is not None and used >= limit:
-            raise PlanAccessError(
+            reset_at = _quota_reset_at_iso()
+            message = (
                 f"Monthly {metric.replace('_', ' ')} limit reached for the {user.plan.value} plan."
+            )
+            raise PlanAccessError(
+                message,
+                feature=metric,
+                plan=user.plan.value,
+                limit=limit,
+                used=used,
+                reset_at=reset_at,
             )
 
     def remaining_quota(self, user: UserProfile) -> dict[str, int | float | None]:
@@ -161,3 +191,14 @@ def _remaining(limit: int | float | None, used: int | float) -> int | float | No
 
 def _month_key() -> str:
     return datetime.now(tz=UTC).strftime("%Y-%m")
+
+
+def _quota_reset_at_iso() -> str:
+    """UTC instant when the current monthly quota window resets (first moment of next calendar month)."""
+    now = datetime.now(tz=UTC)
+    if now.month == 12:
+        nxt = datetime(now.year + 1, 1, 1, tzinfo=UTC)
+    else:
+        nxt = datetime(now.year, now.month + 1, 1, tzinfo=UTC)
+    return nxt.strftime("%Y-%m-%dT%H:%M:%SZ")
+

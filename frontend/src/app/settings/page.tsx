@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Separator } from "@/components/ui/separator";
 import { api } from "@/lib/api";
+import { PLAN_USAGE_CHANGED_EVENT } from "@/lib/app-events";
 import { useAuth } from "@/components/auth/AuthProvider";
 import type { PlanResponse, PlanUsage } from "@/types/api";
 
@@ -43,10 +44,18 @@ export default function SettingsPage() {
   const [usage, setUsage] = useState<PlanUsage | null>(null);
 
   useEffect(() => {
-    void Promise.all([api.fetchMyPlan(), api.fetchMyPlanUsage()]).then(([planData, usageData]) => {
-      setPlan(planData);
-      setUsage(usageData);
-    });
+    const loadPlans = () => {
+      void Promise.all([api.fetchMyPlan(), api.fetchMyPlanUsage()]).then(([planData, usageData]) => {
+        setPlan(planData);
+        setUsage(usageData);
+      });
+    };
+    loadPlans();
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.addEventListener(PLAN_USAGE_CHANGED_EVENT, loadPlans);
+    return () => window.removeEventListener(PLAN_USAGE_CHANGED_EVENT, loadPlans);
   }, []);
 
   const enabledToolCount = useMemo(
@@ -232,10 +241,20 @@ export default function SettingsPage() {
                 <CardTitle>Monthly quota</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
-                <QuotaRow label="Chats" used={usage.monthly_usage.chats} remaining={usage.remaining_quota.chats} />
-                <QuotaRow label="Reports" used={usage.monthly_usage.reports} remaining={usage.remaining_quota.reports} />
-                <QuotaRow label="Scenarios" used={usage.monthly_usage.scenarios} remaining={usage.remaining_quota.scenarios} />
-                <QuotaRow label="Speech uploads" used={usage.monthly_usage.speech_uploads} remaining={usage.remaining_quota.speech_uploads} />
+                {usage.quota_reset_at ? (
+                  <div className="rounded-[0.875rem] border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                    Monthly counters reset (UTC): {formatQuotaResetLabel(usage.quota_reset_at)}
+                  </div>
+                ) : null}
+                <QuotaRow label="Chats" used={usage.monthly_usage.chats} remaining={usage.remaining_quota.chats} limit={usage.limits.monthly_chats ?? null} />
+                <QuotaRow label="Reports" used={usage.monthly_usage.reports} remaining={usage.remaining_quota.reports} limit={usage.limits.monthly_reports ?? null} />
+                <QuotaRow label="Scenarios" used={usage.monthly_usage.scenarios} remaining={usage.remaining_quota.scenarios} limit={usage.limits.monthly_scenarios ?? null} />
+                <QuotaRow
+                  label="Speech uploads"
+                  used={usage.monthly_usage.speech_uploads ?? 0}
+                  remaining={usage.remaining_quota.speech_uploads ?? null}
+                  limit={usage.limits.monthly_speech_uploads ?? null}
+                />
               </CardContent>
             </Card>
           )}
@@ -249,19 +268,34 @@ function QuotaRow({
   label,
   used,
   remaining,
+  limit,
 }: {
   label: string;
   used: number;
   remaining: number | null;
+  limit?: number | null;
 }) {
+  const lim = limit ?? null;
   return (
     <div className="flex items-center justify-between rounded-[0.875rem] border border-border/60 bg-background/45 px-3 py-2.5">
       <span className="text-muted-foreground">{label}</span>
       <span className="tabular">
-        {used} used{remaining === null ? " · unlimited" : ` · ${remaining} left`}
+        {used} used
+        {lim != null ? ` / ${lim} limit` : ""}
+        {remaining === null ? " · unlimited" : ` · ${remaining} left`}
       </span>
     </div>
   );
+}
+
+function formatQuotaResetLabel(isoUtc: string): string {
+  const d = Date.parse(isoUtc);
+  if (Number.isNaN(d)) return isoUtc;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(d);
 }
 
 function SettingRow({

@@ -394,4 +394,4 @@ def test_trade_idea_with_ticker_uses_sec_filings(tmp_path: Path, kb_dir: Path) -
     # The deterministic classifier may pick trade_idea or risk_check depending
     # on which keyword matches first; both are valid for this query. What matters
     # is that SEC filings and market data were retrieved.
-    assert decision.intent in {"trade_idea", "risk_check"}
+    assert decision.intent in {"trade_idea", "risk_check", "investment_recommendation"}

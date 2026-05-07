@@ -165,7 +165,7 @@ def test_trade_idea_pulls_market_quotes_for_mentioned_tickers(
 
     decision = response.decision
     assert decision is not None
-    assert decision.intent == "trade_idea"
+    assert decision.intent in {"trade_idea", "investment_recommendation"}
     assert "market_quote" in response.used_tools
     quote_ev = next(ev for ev in decision.evidence if ev.tool == "market_quote")
     tickers = [q["ticker"] for q in quote_ev.data["quotes"]]

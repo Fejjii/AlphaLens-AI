@@ -32,7 +32,7 @@ docker compose ps
 
 ```bash
 cd backend
-uv sync --extra dev
+uv sync
 uv run uvicorn alphalens.api.main:app --reload
 ```
 
@@ -44,6 +44,53 @@ Run tests:
 ```bash
 uv run pytest
 ```
+
+Windows (PowerShell) quick start for backend tests:
+
+```powershell
+cd backend
+uv sync
+uv run pytest
+```
+
+Speech endpoint smoke test (multipart upload):
+
+```bash
+curl -X POST http://localhost:8000/speech/transcribe \
+  -H "Authorization: Bearer <access_token>" \
+  -F "file=@sample.webm;type=audio/webm"
+```
+
+Windows PowerShell variant:
+
+```powershell
+curl.exe -X POST http://localhost:8000/speech/transcribe ^
+  -H "Authorization: Bearer <access_token>" ^
+  -F "file=@sample.webm;type=audio/webm"
+```
+
+Chrome live microphone recordings are typically uploaded as
+`audio/webm` or `audio/webm;codecs=opus`.
+
+### Microphone transcription (OpenAI)
+
+Real speech-to-text uses OpenAI and requires `OPENAI_API_KEY` in the backend environment.
+
+1. Add `OPENAI_API_KEY=...` to the project `.env` file in the repo root (the same file Docker Compose loads).
+2. Restart containers so the backend process picks up the variable: `docker compose down` then `docker compose up --build`.
+3. Verify the API (requires an authenticated session): `GET /speech/capabilities` should report `provider_mode: "real"`, `openai_key_configured: true`, and `microphone_transcription_available: true`.
+
+```bash
+curl -s http://localhost:8000/speech/capabilities -H "Authorization: Bearer <access_token>"
+```
+
+Without a key, `/speech/transcribe` returns an empty `transcript`, a separate `demo_transcript` for optional demos, and `fallback_used: true`. Inspect server-side traces in development with:
+
+```bash
+docker compose logs backend | findstr speech
+```
+
+On Unix shells, use `grep speech` instead of `findstr`.
 
 The backend startup path now creates SQLAlchemy tables for approvals, feedback,
 reports, scenarios, usage events, users, and conversation memory when Postgres
@@ -79,6 +126,12 @@ docker compose up --build
 ```
 
 This builds and runs `backend` and `frontend` alongside the data plane.
+
+Docker persistence behavior for demo data:
+
+- `docker compose down` keeps named volumes, so Postgres users and refresh tokens stay available.
+- `docker compose down -v` removes named volumes and deletes demo Postgres data.
+- Use `docker compose down -v` only when you intentionally need a clean reset.
 
 ## Common issues
 

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request
 from alphalens.api.deps import CurrentUserDep, FeedbackServiceDep
 from alphalens.api.rate_limit import rate_limit_request
 from alphalens.core.config import get_settings
-from alphalens.schemas.feedback import FeedbackCreate, FeedbackRecord, FeedbackSummary
+from alphalens.schemas.feedback import FeedbackCreate, FeedbackRecord, FeedbackSummary, RecentFeedbackItem
 
 router = APIRouter(prefix="/feedback", tags=["feedback"])
 
@@ -37,3 +37,11 @@ def get_feedback_summary(
     current_user: CurrentUserDep,
 ) -> FeedbackSummary:
     return service.summarize_feedback(user_id=current_user.id)
+
+
+@router.get("/recent", response_model=list[RecentFeedbackItem])
+def recent_feedback(
+    service: FeedbackServiceDep,
+    current_user: CurrentUserDep,
+) -> list[RecentFeedbackItem]:
+    return service.list_recent_feedback(user_id=current_user.id)

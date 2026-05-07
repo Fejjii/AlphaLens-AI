@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from alphalens.core.logging import get_logger
 from alphalens.schemas.common import ErrorResponse
+from alphalens.services.plan_service import PlanAccessError
 
 log = get_logger(__name__)
 
@@ -63,6 +64,27 @@ async def _validation_handler(_: Request, exc: RequestValidationError) -> JSONRe
     )
 
 
+async def _plan_access_handler(_: Request, exc: PlanAccessError) -> JSONResponse:
+    log.info(
+        "quota_exceeded",
+        error="quota_exceeded",
+        feature=exc.feature,
+        plan=exc.plan,
+        limit=exc.limit,
+        used=exc.used,
+    )
+    detail = {
+        "error": "quota_exceeded",
+        "feature": exc.feature,
+        "plan": exc.plan,
+        "limit": exc.limit,
+        "used": exc.used,
+        "reset_at": exc.reset_at,
+        "message": exc.message,
+    }
+    return JSONResponse(status_code=status.HTTP_429_TOO_MANY_REQUESTS, content={"detail": detail})
+
+
 async def _unhandled_handler(_: Request, exc: Exception) -> JSONResponse:
     log.exception("unhandled_error", error=str(exc))
     return _error_response(
@@ -75,4 +97,5 @@ async def _unhandled_handler(_: Request, exc: Exception) -> JSONResponse:
 def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(AppError, _app_error_handler)
     app.add_exception_handler(RequestValidationError, _validation_handler)
+    app.add_exception_handler(PlanAccessError, _plan_access_handler)
     app.add_exception_handler(Exception, _unhandled_handler)

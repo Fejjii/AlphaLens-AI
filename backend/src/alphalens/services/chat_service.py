@@ -13,17 +13,22 @@ from typing import Any
 
 from alphalens.agents.graph import build_graph
 from alphalens.agents.state import AgentState
-from alphalens.core.config import Settings
+from alphalens.core.config import Settings, get_settings
+from alphalens.core.logging import get_logger
 from alphalens.memory.service import MemoryService
 from alphalens.services.language_service import get_response_language
 from alphalens.schemas.agent import (
     AgentDecision,
+    ChatAnalysis,
     ChatMessage,
     ChatRequest,
     ChatResponse,
     ChatRole,
     Citation,
     EvidenceItem,
+    EvidenceSource,
+    ProviderMode,
+    RAGSource,
     Recommendation,
     RiskLevel,
 )
@@ -48,6 +53,8 @@ from alphalens.tools.risk_tool import make_risk_tool
 from alphalens.tools.sec_tool import make_sec_filings_tool
 from alphalens.tools.web_search_tool import make_web_search_tool
 from alphalens.schemas.user import UserProfile
+
+log = get_logger(__name__)
 
 
 def _resolve_holdings_path(settings: Settings) -> Path:
@@ -139,7 +146,14 @@ class ChatService:
             checkpointer=_build_checkpointer(enabled=settings.memory_enabled),
         )
 
-    def chat(self, request: ChatRequest, *, user: UserProfile | None = None) -> ChatResponse:
+    def chat(
+        self,
+        request: ChatRequest,
+        *,
+        user: UserProfile | None = None,
+        request_id: str | None = None,
+        endpoint: str = "/agent/chat",
+    ) -> ChatResponse:
         user = user or _demo_user()
         conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:12]}"
         request_messages = [m.model_dump(mode="json") for m in request.messages]
@@ -188,6 +202,15 @@ class ChatService:
             response=response,
             final_state=final_state,
         )
+        self._log_debug_trace(
+            request_id=request_id,
+            conversation_id=conversation_id,
+            endpoint=endpoint,
+            user_id=user.id,
+            latest_user_text=latest_user_text,
+            final_state=final_state,
+            response=response,
+        )
         return response
 
     @property
@@ -235,6 +258,36 @@ class ChatService:
             metadata=metadata,
         )
 
+    def _log_debug_trace(
+        self,
+        *,
+        request_id: str | None,
+        conversation_id: str,
+        endpoint: str,
+        user_id: str | None,
+        latest_user_text: str,
+        final_state: AgentState,
+        response: ChatResponse,
+    ) -> None:
+        if not self._settings.is_dev:
+            return
+        rag_sources = response.analysis.rag_sources
+        provider_mode = "openai" if self._llm_service.using_llm else "deterministic_fallback"
+        log.info(
+            "chat_debug_trace",
+            request_id=request_id or "n/a",
+            conversation_id=conversation_id,
+            user_id=user_id or "anonymous",
+            received_message=latest_user_text[:300],
+            endpoint=endpoint,
+            detected_intent=response.analysis.intent,
+            selected_tools=list(response.analysis.tools_used),
+            rag_requested=bool(final_state.get("rag_requested") or final_state.get("needs_rag")),
+            rag_chunks_count=len(rag_sources),
+            final_answer_preview=response.analysis.final_answer[:300],
+            provider_mode=provider_mode,
+        )
+
 
 def _build_checkpointer(*, enabled: bool) -> Any | None:
     if not enabled:
@@ -268,7 +321,7 @@ def _to_response(
         for c in state.get("citations", [])
     ]
     decision = AgentDecision(
-        intent=state.get("intent", "general"),
+        intent=state.get("intent", "general_question"),
         recommendation=Recommendation(state.get("recommendation", "inform")),
         reasoning=list(state.get("reasoning", [])),
         evidence=[
@@ -302,6 +355,73 @@ def _to_response(
     if decision.requires_approval:
         approval = approvals_service.create_approval_from_decision(decision, user_id=user_id)
         decision.approval_id = approval.approval_id
+    rag_chunks = _rag_chunks(state)
+    rag_used = "rag_retrieve" in state.get("used_tools", [])
+    rag_requested = bool(state.get("rag_requested") or state.get("needs_rag"))
+    rag_unavailable = _provider_mode("Qdrant", "fallback") != "connected"
+    rag_status = _rag_status(
+        rag_chunks=rag_chunks,
+        rag_used=rag_used,
+        rag_requested=rag_requested,
+        rag_unavailable=rag_unavailable,
+    )
+    retrieval_mode = _retrieval_mode(rag_chunks=rag_chunks)
+    evidence_items = [
+        EvidenceSource(
+            title=str(ev.get("tool", "tool")),
+            detail=str(ev.get("summary", "")),
+            source_type="tool",
+        )
+        for ev in state.get("evidence", [])
+    ]
+    tools_used = list(state.get("used_tools", []))
+    provider_modes = _provider_modes()
+    analysis = ChatAnalysis(
+        intent=decision.intent,
+        final_answer=answer,
+        recommendation=decision.recommendation,
+        confidence=decision.confidence,
+        approval_required=decision.requires_approval,
+        approval_reason=decision.approval_required_reason,
+        tools_used=tools_used,
+        provider_modes=provider_modes,
+        evidence_items=evidence_items,
+        rag_sources=[
+            RAGSource(
+                document_title=str(chunk.get("source", "knowledge")),
+                chunk_id=str(chunk.get("chunk_id", "")),
+                score=float(chunk.get("score", 0.0)),
+                snippet=str(chunk.get("text", ""))[:320],
+                source=str(chunk.get("source", "")),
+            )
+            for chunk in rag_chunks
+        ],
+        rag_status=rag_status,
+        retrieval_mode=retrieval_mode,
+        portfolio_snapshot_used="synthetic_portfolio_holdings.csv",
+        policy_rules_used=list(decision.policy_flags),
+        data_freshness="Synthetic snapshot generated at request time.",
+        data_used=_data_used_summary(
+            tools_used=tools_used,
+            rag_chunks=rag_chunks,
+            provider_modes=provider_modes,
+        ),
+        limitations=[LIMITATIONS_TEXT, "Benchmark performance requires external provider connectivity."],
+        disclaimer=DISCLAIMER_TEXT,
+        orchestration_trace={
+            "intent_detected": decision.intent,
+            "tools_selected": tools_used,
+            "evidence_gathered": [item.title for item in evidence_items],
+            "rag_retrieval_status": rag_status,
+            "retrieval_mode": retrieval_mode,
+            "synthesis_mode": "deterministic_fallback",
+            "approval_gate_result": (
+                f"approval required ({decision.approval_required_reason or 'policy gate'})"
+                if decision.requires_approval
+                else "no approval required"
+            ),
+        },
+    )
     return ChatResponse(
         conversation_id=conversation_id,
         response_id=response_id,
@@ -311,6 +431,7 @@ def _to_response(
         citations=citations,
         used_tools=list(state.get("used_tools", [])),
         decision=decision,
+        analysis=analysis,
     )
 
 
@@ -335,3 +456,97 @@ def _decision_supports_ticker(state: AgentState) -> bool:
 def _portfolio_impact(state: AgentState) -> float | None:
     impact = state.get("portfolio_impact")
     return float(impact) if isinstance(impact, (int, float)) else None
+
+
+def _provider_modes() -> list[ProviderMode]:
+    settings = get_settings()
+    return [
+        ProviderMode(
+            name="OpenAI LLM",
+            mode="real" if settings.llm_enabled and bool(settings.openai_api_key) else "fallback",
+            reason=None
+            if settings.llm_enabled and settings.openai_api_key
+            else "OPENAI_API_KEY not configured",
+        ),
+        ProviderMode(
+            name="Market Data",
+            mode="real"
+            if settings.market_data_provider == "alpha_vantage"
+            and bool(settings.alpha_vantage_api_key)
+            else "fallback",
+            reason=None
+            if settings.market_data_provider == "alpha_vantage" and settings.alpha_vantage_api_key
+            else "ALPHA_VANTAGE_API_KEY not configured",
+        ),
+        ProviderMode(
+            name="Web/News",
+            mode="real" if settings.search_provider == "serper" and bool(settings.serper_api_key) else "fallback",
+            reason=None
+            if settings.search_provider == "serper" and settings.serper_api_key
+            else "SERPER_API_KEY not configured",
+        ),
+        ProviderMode(
+            name="Qdrant",
+            mode="connected" if settings.qdrant_url else "fallback",
+            reason=None if settings.qdrant_url else "QDRANT_URL not configured",
+        ),
+    ]
+
+
+def _provider_mode(name: str, fallback: str) -> str:
+    for mode in _provider_modes():
+        if mode.name == name:
+            return mode.mode
+    return fallback
+
+
+def _rag_status(
+    *,
+    rag_chunks: list[dict[str, Any]],
+    rag_used: bool,
+    rag_requested: bool,
+    rag_unavailable: bool,
+) -> str:
+    if rag_chunks:
+        return "used"
+    if rag_unavailable:
+        return "unavailable"
+    if rag_used or rag_requested:
+        return "no_results"
+    return "not_requested"
+
+
+def _retrieval_mode(*, rag_chunks: list[dict[str, Any]]) -> str:
+    if not rag_chunks:
+        return "none"
+    scores = [chunk.get("score") for chunk in rag_chunks if isinstance(chunk.get("score"), (int, float))]
+    if not scores:
+        return "unknown"
+    return "qdrant" if any(float(score) > 0.0 for score in scores) else "lexical_fallback"
+
+
+def _data_used_summary(
+    *,
+    tools_used: list[str],
+    rag_chunks: list[dict[str, Any]],
+    provider_modes: list[ProviderMode],
+) -> list[str]:
+    items: list[str] = []
+    if tools_used:
+        items.append(f"Tool outputs: {', '.join(tools_used)}")
+    if rag_chunks:
+        items.append(f"RAG chunks: {len(rag_chunks)}")
+    fallback_modes = [m.name for m in provider_modes if m.mode in {"fallback", "disconnected", "memory_fallback"}]
+    if fallback_modes:
+        items.append(f"Fallback providers: {', '.join(fallback_modes)}")
+    return items
+
+
+def _rag_chunks(state: AgentState) -> list[dict[str, Any]]:
+    for ev in state.get("evidence", []):
+        if ev.get("tool") != "rag_retrieve":
+            continue
+        data = ev.get("data")
+        if isinstance(data, dict) and isinstance(data.get("chunks"), list):
+            return [item for item in data["chunks"] if isinstance(item, dict)]
+    return []

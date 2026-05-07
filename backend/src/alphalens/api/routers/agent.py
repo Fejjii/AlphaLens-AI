@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Request
 
 from alphalens.api.deps import ChatServiceDep, CurrentUserDep, PlanServiceDep, UsageServiceDep
@@ -24,7 +26,13 @@ def chat(
 ) -> ChatResponse:
     plans.ensure_usage_allowed(current_user, "chats")
     rate_limit_request(http_request, route="chat", subject=current_user.id, settings=get_settings())
-    response = service.chat(request, user=current_user)
+    request_id = http_request.headers.get("x-request-id") or f"req_{uuid.uuid4().hex[:12]}"
+    response = service.chat(
+        request,
+        user=current_user,
+        request_id=request_id,
+        endpoint="/agent/chat",
+    )
     usage.record_event(
         event_type="llm_call",
         provider="agent",
@@ -55,7 +63,13 @@ def public_chat(
     """Compatibility endpoint mirroring /agent/chat."""
     plans.ensure_usage_allowed(current_user, "chats")
     rate_limit_request(http_request, route="chat", subject=current_user.id, settings=get_settings())
-    response = service.chat(request, user=current_user)
+    request_id = http_request.headers.get("x-request-id") or f"req_{uuid.uuid4().hex[:12]}"
+    response = service.chat(
+        request,
+        user=current_user,
+        request_id=request_id,
+        endpoint="/chat",
+    )
     usage.record_event(
         event_type="llm_call",
         provider="agent",

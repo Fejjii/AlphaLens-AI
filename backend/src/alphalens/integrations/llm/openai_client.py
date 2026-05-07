@@ -23,7 +23,9 @@ logger = get_logger(__name__)
 _INTENT_SYSTEM_PROMPT = (
     "You are the routing layer of an investment-research agent. "
     "Classify the user's latest message into one of: "
-    "portfolio_review, risk_check, trade_idea, research, general. "
+    "portfolio_performance, policy_breach_check, risk_review, rag_policy_question, "
+    "investment_recommendation, market_news_question, sec_filings_question, "
+    "macro_question, general_question. "
     "Extract any equity tickers mentioned (uppercase, 1-5 letters). "
     "Set the needs_* flags to indicate which tools should be consulted. "
     "Be conservative: only set a flag when the message clearly calls for "

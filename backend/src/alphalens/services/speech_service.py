@@ -1,8 +1,6 @@
-"""Speech service: selects OpenAI transcription or a deterministic fallback."""
+"""Speech service: selects OpenAI transcription (real STT only; no silent demo fallback)."""
 
 from __future__ import annotations
-
-import hashlib
 
 from alphalens.core.config import Settings
 from alphalens.core.logging import get_logger
@@ -14,25 +12,29 @@ logger = get_logger(__name__)
 
 
 class SpeechService:
-    def __init__(self, *, client: SpeechClient, fallback_client: SpeechClient | None = None) -> None:
+    def __init__(self, *, client: SpeechClient) -> None:
         self._client = client
-        self._fallback_client = fallback_client or FallbackSpeechClient()
 
-    def transcribe_audio(self, file_bytes: bytes, filename: str) -> TranscriptionResult:
-        try:
-            return self._client.transcribe_audio(file_bytes=file_bytes, filename=filename)
-        except SpeechError as exc:
-            if isinstance(self._client, FallbackSpeechClient):
-                raise
-            logger.warning("speech_provider_fallback", provider="openai", error=str(exc))
-            return self._fallback_client.transcribe_audio(
-                file_bytes=file_bytes, filename=filename
-            )
+    @property
+    def speech_client_class_name(self) -> str:
+        return self._client.__class__.__name__
 
-
-def _stable_transcript(file_bytes: bytes, filename: str) -> str:
-    digest = hashlib.sha256(file_bytes + filename.encode("utf-8")).hexdigest()[:12]
-    return f"Transcription unavailable. Reference: {digest}."
+    def transcribe_audio(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        *,
+        content_type: str | None = None,
+        request_id: str | None = None,
+        frontend_created_filename: str | None = None,
+    ) -> TranscriptionResult:
+        return self._client.transcribe_audio(
+            file_bytes=file_bytes,
+            filename=filename,
+            content_type=content_type,
+            request_id=request_id,
+            frontend_created_filename=frontend_created_filename,
+        )
 
 
 def get_speech_client(settings: Settings) -> SpeechClient:

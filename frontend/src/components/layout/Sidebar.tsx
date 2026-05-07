@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
@@ -37,11 +38,74 @@ const NAV: NavItem[] = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function Sidebar() {
+const SIDEBAR_WIDTH_KEY = "alphalens.sidebar.width";
+const DEFAULT_WIDTH = 280;
+const MIN_WIDTH = 220;
+const MAX_WIDTH = 380;
+
+interface SidebarProps {
+  width?: number;
+  onWidthChange?: (width: number) => void;
+}
+
+export function Sidebar({ width, onWidthChange }: SidebarProps) {
   const pathname = usePathname();
+  const [internalWidth, setInternalWidth] = useState(DEFAULT_WIDTH);
+  const resizingRef = useRef(false);
+  const widthValue = useMemo(() => width ?? internalWidth, [internalWidth, width]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || width != null) return;
+    const saved = window.localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    if (!saved) return;
+    const parsed = Number(saved);
+    if (!Number.isFinite(parsed)) return;
+    const clamped = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, parsed));
+    setInternalWidth(clamped);
+    onWidthChange?.(clamped);
+  }, [onWidthChange, width]);
+
+  useEffect(() => {
+    if (width == null || typeof window === "undefined") return;
+    window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
+  }, [width]);
+
+  const setWidth = (next: number) => {
+    const clamped = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, next));
+    if (width == null) {
+      setInternalWidth(clamped);
+    }
+    onWidthChange?.(clamped);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(clamped));
+    }
+  };
+
+  const startResize = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    resizingRef.current = true;
+    const originX = event.clientX;
+    const startWidth = widthValue;
+
+    const onMove = (moveEvent: MouseEvent) => {
+      if (!resizingRef.current) return;
+      const delta = moveEvent.clientX - originX;
+      setWidth(startWidth + delta);
+    };
+    const onUp = () => {
+      resizingRef.current = false;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
 
   return (
-    <aside className="sticky top-0 hidden h-screen w-68 shrink-0 flex-col border-r border-border/70 bg-card/75 backdrop-blur xl:flex">
+    <aside
+      className="sticky top-0 hidden h-screen shrink-0 flex-col border-r border-border/70 bg-card/75 backdrop-blur xl:flex"
+      style={{ width: `${widthValue}px` }}
+    >
       <div className="border-b border-border/70 px-5 py-5">
         <div className="flex items-center gap-3">
           <div className="rounded-2xl bg-primary/12 p-2 text-primary">
@@ -83,6 +147,14 @@ export function Sidebar() {
           <div className="mt-1">Demo workspace with deterministic fallback data enabled.</div>
         </div>
       </div>
+      <button
+        type="button"
+        className="absolute inset-y-0 -right-1.5 w-3 cursor-col-resize rounded-full bg-transparent transition-colors hover:bg-primary/20"
+        aria-label="Resize sidebar"
+        onMouseDown={startResize}
+      >
+        <span className="mx-auto block h-12 w-[2px] rounded-full bg-border/80" />
+      </button>
     </aside>
   );
 }

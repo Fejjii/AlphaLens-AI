@@ -87,6 +87,7 @@ class Settings(BaseSettings):
         gt=0,
         alias="SPEECH_MAX_UPLOAD_BYTES",
     )
+    dev_bypass_quotas: bool = Field(default=False, alias="DEV_BYPASS_QUOTAS")
 
     alpha_vantage_api_key: str | None = Field(
         default=None, alias="ALPHA_VANTAGE_API_KEY"

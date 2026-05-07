@@ -119,6 +119,27 @@ export const mockChatResponse: ChatResponse = {
   citations: [],
   used_tools: [],
   decision: null,
+  analysis: {
+    intent: "general",
+    final_answer:
+      "I'm AlphaLens, your investment intelligence copilot. Ask me about your portfolio, research notes, risk metrics, or pending approvals.",
+    recommendation: "inform",
+    confidence: 0.7,
+    approval_required: false,
+    approval_reason: null,
+    tools_used: [],
+    provider_modes: [],
+    evidence_items: [],
+    rag_sources: [],
+    rag_status: "No RAG retrieval was triggered because intent was general.",
+    portfolio_snapshot_used: "synthetic_portfolio_holdings.csv",
+    policy_rules_used: [],
+    data_freshness: "Synthetic snapshot",
+    data_used: [],
+    limitations: ["Demo response"],
+    disclaimer: "Demo mode",
+    orchestration_trace: {},
+  },
 };
 
 export const mockUsageSummary: UsageSummary = {

@@ -4,7 +4,8 @@ import pytest
 from httpx import AsyncClient
 
 from alphalens.api import deps
-from alphalens.services.plan_service import PlanAccessError
+from alphalens.core.config import get_settings
+from alphalens.services.plan_service import PlanAccessError, PlanService
 
 
 async def test_plans_me_and_usage(client: AsyncClient, auth_headers: dict[str, str]) -> None:
@@ -16,6 +17,9 @@ async def test_plans_me_and_usage(client: AsyncClient, auth_headers: dict[str, s
     assert usage_response.status_code == 200
     body = usage_response.json()
     assert body["plan"] == "free"
+    assert "quota_reset_at" in body
+    assert isinstance(body["quota_reset_at"], str)
+    assert body["quota_reset_at"].startswith("20")
     assert "monthly_usage" in body
     assert "remaining_quota" in body
 
@@ -55,8 +59,7 @@ async def test_free_user_quota_exceeded_returns_clear_error(
             user_id=user.id,
         )
 
-    plan_service = deps.get_plan_service()
-    plan_service._usage_service = usage_service  # type: ignore[attr-defined]
+    plan_service = PlanService(settings=get_settings(), usage_service=usage_service)
     with pytest.raises(PlanAccessError):
         plan_service.ensure_usage_allowed(user, "chats")
 
@@ -73,6 +76,6 @@ async def test_pro_and_team_have_higher_limits(
     repo.update(updated, password_hash=repo.get_password_hash(user.id) or "")
     refreshed = repo.get_by_email(user.email)
     assert refreshed is not None
-    plan = deps.get_plan_service().get_current_plan(refreshed)
+    plan = PlanService(settings=get_settings(), usage_service=deps.get_usage_service()).get_current_plan(refreshed)
     assert plan.plan == "pro"
     assert plan.limits.monthly_chats and plan.limits.monthly_chats > 50

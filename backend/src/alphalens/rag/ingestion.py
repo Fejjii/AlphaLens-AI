@@ -1,8 +1,8 @@
 """RAG ingestion pipeline.
 
-Reads markdown files from disk, chunks them, embeds them, and upserts
-the resulting points into a Qdrant collection. Idempotent: re-running
-ingestion replaces existing points for the same `(source, order)`.
+Reads markdown and plain-text files from disk, chunks them, embeds them,
+and upserts the resulting points into a Qdrant collection. Idempotent:
+re-running ingestion replaces existing points for the same `(source, order)`.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ def ingest_directory(
     collection: str,
     embedder: Embedder,
 ) -> IngestionResult:
-    """Ingest every `.md` file under `directory` into Qdrant.
+    """Ingest every supported knowledge file under `directory` into Qdrant.
 
     Args:
         directory: Root path to scan recursively for markdown files.
@@ -68,11 +68,11 @@ def ingest_directory(
 
     ensure_collection(client, collection, embedder.dimension)
 
-    md_files = sorted(directory.rglob("*.md"))
+    files = sorted([*directory.rglob("*.md"), *directory.rglob("*.txt")])
     points: list[qmodels.PointStruct] = []
     doc_count = 0
 
-    for path in md_files:
+    for path in files:
         text = path.read_text(encoding="utf-8")
         if not text.strip():
             continue

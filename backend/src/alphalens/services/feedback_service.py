@@ -6,7 +6,7 @@ import uuid
 from collections import Counter
 
 from alphalens.repositories.feedback import FeedbackRepository, InMemoryFeedbackRepository
-from alphalens.schemas.feedback import FeedbackCreate, FeedbackRecord, FeedbackSummary
+from alphalens.schemas.feedback import FeedbackCreate, FeedbackRecord, FeedbackSummary, RecentFeedbackItem
 from alphalens.services.usage_service import UsageService
 
 
@@ -60,6 +60,20 @@ class FeedbackService:
             thumbs_down=ratings["thumbs_down"],
             by_category=dict(sorted(categories.items())),
         )
+
+    def list_recent_feedback(self, *, user_id: str, limit: int = 20) -> list[RecentFeedbackItem]:
+        records = self._repository.list(user_id=user_id)[:limit]
+        return [
+            RecentFeedbackItem(
+                response_id=record.response_id,
+                rating=record.rating,
+                category=record.category,
+                comment=record.comment,
+                created_at=record.created_at,
+                message_preview=(record.comment or "")[:140] or None,
+            )
+            for record in records
+        ]
 
     def reset(self) -> None:
         clear = getattr(self._repository, "clear", None)

@@ -38,3 +38,5 @@ class PlanUsage(APIModel):
     limits: PlanLimits
     capabilities: PlanCapabilities
     current_month: str
+    quota_reset_at: str
+

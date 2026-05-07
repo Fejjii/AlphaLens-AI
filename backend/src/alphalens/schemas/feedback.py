@@ -49,3 +49,12 @@ class FeedbackSummary(APIModel):
     thumbs_up: int
     thumbs_down: int
     by_category: dict[str, int] = Field(default_factory=dict)
+
+
+class RecentFeedbackItem(APIModel):
+    response_id: str | None = None
+    rating: FeedbackRating
+    category: FeedbackCategory | None = None
+    comment: str | None = None
+    created_at: datetime
+    message_preview: str | None = None

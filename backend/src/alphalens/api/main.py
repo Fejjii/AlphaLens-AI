@@ -9,9 +9,25 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from alphalens.api import deps
-from alphalens.api.rate_limit import build_rate_limiter
 from alphalens.api.middleware import SecurityHeadersMiddleware
-from alphalens.api.routers import agent, approvals, auth, feedback, health, memory, plans, portfolio, rag, reports, scenarios, speech, usage
+from alphalens.api.rate_limit import build_rate_limiter
+from alphalens.api.routers import (
+    agent,
+    approvals,
+    auth,
+    feedback,
+    health,
+    knowledge,
+    memory,
+    plans,
+    portfolio,
+    rag,
+    reports,
+    runtime,
+    scenarios,
+    speech,
+    usage,
+)
 from alphalens.core.config import Settings, get_settings
 from alphalens.core.errors import register_exception_handlers
 from alphalens.core.logging import configure_logging, get_logger
@@ -25,21 +41,37 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
     log = get_logger("alphalens.api")
     log.info("api_startup", env=settings.app_env, version=settings.app_version)
+    if settings.is_dev:
+        speech_pm = "real" if settings.speech_enabled and bool(settings.openai_api_key) else "fallback"
+        log.info(
+            "speech_runtime_startup",
+            openai_key_configured=bool(settings.openai_api_key),
+            speech_provider_mode=speech_pm,
+        )
+    deps._persistence_runtime_state.cache_clear()
     if settings.persistence_backend == "postgres" and settings.app_database_url:
         try:
             engine = create_engine_from_settings(settings)
             Base.metadata.create_all(bind=engine)
+            deps._persistence_runtime_state.cache_clear()
             deps._approval_repository.cache_clear()
             deps._approvals_service.cache_clear()
+            deps._user_repository.cache_clear()
+            deps._refresh_token_repository.cache_clear()
+            deps._auth_service.cache_clear()
             deps._feedback_repository.cache_clear()
             deps._report_repository.cache_clear()
             deps._scenario_repository.cache_clear()
             deps._usage_service.cache_clear()
             deps._memory_service.cache_clear()
-        except Exception:
+        except Exception as exc:
             if settings.app_env not in {"dev", "test"}:
                 raise
-            log.warning("persistence_startup_fallback", backend="in_memory")
+            log.warning(
+                "persistence_startup_fallback",
+                backend="in_memory",
+                reason=f"{exc.__class__.__name__}: {exc}",
+            )
     try:
         yield
     finally:
@@ -83,6 +115,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(speech.router)
     app.include_router(memory.router)
     app.include_router(rag.router)
+    app.include_router(knowledge.router)
+    app.include_router(runtime.router)
     app.include_router(usage.router)
     app.include_router(feedback.router)
     app.include_router(reports.router)

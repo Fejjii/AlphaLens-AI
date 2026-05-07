@@ -21,6 +21,7 @@ class AgentState(TypedDict, total=False):
     tickers: list[str]
     needs_market_data: bool
     needs_rag: bool
+    rag_requested: bool
     needs_portfolio: bool
     needs_risk_check: bool
     needs_web_search: bool

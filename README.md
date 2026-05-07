@@ -1,371 +1,201 @@
 # AlphaLens AI
 
-AlphaLens AI is a demo-ready agentic investment intelligence platform for
-reviewing portfolio risk, generating investment memos, routing decisions
-through human approval, and tracking model/tool usage in a polished SaaS
-interface.
+AlphaLens AI is an agentic investment intelligence and portfolio decision support platform built for production-style evaluation.
 
-It combines a FastAPI backend, a Next.js frontend, LangGraph-based agent
-orchestration, retrieval-augmented context, and deterministic fallbacks so the
-full product remains evaluable even when optional external providers are not
-configured.
+## 1) Product Problem and Target Users
 
-## Problem Statement
+Investment teams typically split workflow across disconnected tools for portfolio analytics, policy checks, research, and approvals. That creates weak traceability, inconsistent decision quality, and limited governance over AI-generated recommendations.
 
-Investment teams often work across fragmented tools: one system for portfolio
-analytics, another for research, another for approvals, and separate ad hoc
-LLM experiments with weak auditability. That creates four problems:
+AlphaLens AI unifies those workflows for:
+- portfolio managers reviewing risk and position decisions;
+- research analysts generating investment memos and scenarios;
+- compliance and risk reviewers enforcing policy guardrails;
+- technical reviewers evaluating an end-to-end AI engineering system.
 
-1. market, portfolio, policy, macro, SEC, and internal research context is not
-   assembled in one place;
-2. agentic recommendations are difficult to inspect and hard to trust;
-3. human approval workflows are bolted on late instead of designed in;
-4. demos and evaluations break when live APIs or keys are unavailable.
+## 2) Key Features
 
-AlphaLens addresses this by providing a single interface where an agent can
-investigate an investment question, show evidence and tool usage, generate a
-decision artifact, route it through human approval when needed, and remain
-stable in offline or deterministic demo mode.
+- FastAPI + Next.js full-stack product with authenticated user workflows
+- LangGraph agent orchestration (`interpret -> gather -> synthesize -> decide`)
+- Hybrid RAG over internal and uploaded documents using Qdrant
+- Market/news/macro/SEC tooling with fallback provider architecture
+- Human-in-the-loop (HITL) approvals for sensitive recommendations
+- Reports, scenario simulations, feedback capture, and usage/cost tracking
+- Plan quotas, JWT auth + refresh token support, and rate limiting
+- Deterministic fallback mode for reliable local demos without external APIs
 
-## Target Users
+## 3) Architecture Overview
 
-- Portfolio managers reviewing positions, risks, and trade ideas
-- Research analysts producing memos and scenario analysis
-- Risk and compliance reviewers validating rationale and approvals
-- Reviewers and evaluators assessing an AI-native fintech workflow end to end
+At a high level:
+- browser users interact with a Next.js frontend;
+- frontend calls FastAPI backend (`/api/backend` proxy pattern supported);
+- backend orchestrates LangGraph, tools, provider adapters, and storage;
+- Postgres, Redis, and Qdrant provide persistence, caching, and retrieval.
 
-## Key Features
+Detailed architecture diagrams are in [docs/architecture.md](docs/architecture.md).
 
-- Portfolio dashboard with risk, alerts, holdings, and usage visibility
-- Agent chat that investigates through portfolio, policy, market, news, macro,
-  SEC, and retrieval tools
-- Decision cards with recommendation, confidence, evidence, and approval state
-- Human-in-the-loop approval queue with audit-friendly status tracking
-- Structured memo generation from chat context
-- Deterministic scenario simulation for what-if analysis
-- Usage and cost dashboard for LLM/tool activity and feedback loops
-- Deterministic fallback mode so the app remains demoable without live APIs
+## 4) AI Agent Workflow
 
-## Architecture Overview
+AlphaLens uses a multi-step agent workflow, not a single prompt-response chatbot:
+- interpret user intent and classify task;
+- gather evidence via portfolio tools, policy checks, market/news/macro/SEC, and RAG;
+- synthesize evidence with explicit limitations;
+- decide recommendation with compliance metadata and approval gating.
 
-AlphaLens is split into three surfaces:
+Detailed flow and sequence diagram: [docs/agent_workflow.md](docs/agent_workflow.md).
 
-- `frontend/`: Next.js App Router application for dashboards, chat, reports,
-  approvals, settings, and reviewer demo flow
-- `backend/`: FastAPI service exposing typed endpoints for portfolio, chat,
-  approvals, reports, scenarios, usage, memory, speech, and health
-- infrastructure: Dockerized Postgres, Redis, and Qdrant, with optional
-  external providers for LLM, market data, search/news, macro data, and SEC
+## 5) Hybrid RAG Overview
 
-See the full architecture package:
+RAG combines internal knowledge base documents with uploaded user documents:
+- ingestion chunks markdown/text sources and stores embeddings in Qdrant;
+- retrieval provides relevant evidence snippets for response grounding;
+- response payload includes source references for UI display.
 
-- [docs/architecture.md](docs/architecture.md)
-- [docs/codebase_guide.md](docs/codebase_guide.md)
-- [docs/scripts.md](docs/scripts.md)
-- [docs/decisions.md](docs/decisions.md)
-- [docs/demo_script.md](docs/demo_script.md)
-- [docs/validation_report.md](docs/validation_report.md)
-- [docs/setup.md](docs/setup.md)
-- [docs/deployment.md](docs/deployment.md)
+Detailed RAG design: [docs/rag_system.md](docs/rag_system.md).
 
-## Tech Stack
+## 6) Data and Storage Architecture
 
-### Frontend
+- `Postgres`: users, refresh tokens, approvals, feedback, reports, scenarios, usage events, conversation memory
+- `Redis`: cache, rate limiting, and runtime fallback support where configured
+- `Qdrant`: document vectors and chunk metadata for hybrid retrieval
+- local files: seeded synthetic data and seeded knowledge base content
 
-- Next.js 14 App Router
-- React 18
-- TypeScript
-- Tailwind CSS
-- Radix UI primitives
+Detailed data map: [docs/data_architecture.md](docs/data_architecture.md).
 
-### Backend
+## 7) Security, Compliance, and HITL
 
-- FastAPI
-- Pydantic v2
-- LangGraph
-- SQLAlchemy
-- Redis client
-- Qdrant client
-- OpenAI SDK
+- JWT access + refresh token auth model
+- protected API routes and plan quota enforcement
+- upload validation and rate limiting
+- policy guardrails with approval queue for sensitive actions
+- compliance metadata included in agent responses
 
-### Infrastructure
+Security and compliance details: [docs/security_compliance.md](docs/security_compliance.md).
 
-- Docker Compose
-- Postgres 16
-- Redis 7
-- Qdrant
+## 8) Tech Stack
 
-## Repository Layout
+- **Frontend:** Next.js, React, TypeScript, Tailwind CSS
+- **Backend:** FastAPI, Pydantic, LangGraph, SQLAlchemy
+- **AI/RAG:** OpenAI, Qdrant, structured tool orchestration
+- **Data/Infra:** Postgres, Redis, Docker Compose
+- **CI/CD:** GitHub Actions workflows for backend, frontend, docker, security
 
-```text
-AlphaLens-AI/
-  backend/      FastAPI service, agent orchestration, tools, tests
-  frontend/     Next.js dashboard and reviewer-facing UI
-  docs/         Architecture, scripts, codebase guide, demo, validation, deploy
-  data/         Synthetic fixtures and knowledge sources
-  docker-compose.yml
-  .env.example
-```
-
-## Setup Instructions
-
-### Prerequisites
-
-- Python 3.11+
-- Node.js 20+
-- [uv](https://docs.astral.sh/uv/)
-- [pnpm](https://pnpm.io/) 9+ for normal frontend workflows
-- Docker Desktop / Docker Compose
-
-### 1. Configure environment
+## 9) Quick Start With Docker
 
 ```bash
 cp .env.example .env
+docker compose up --build
 ```
 
-Optional for local frontend-only development:
+Then open:
+- frontend: `http://localhost:3000`
+- backend health: `http://localhost:8000/health`
+- backend docs: `http://localhost:8000/docs`
 
-```bash
-cd frontend
-cp .env.local.example .env.local
-```
+## 10) Local Development Setup
 
-### 2. Start infrastructure services
-
-```bash
-docker compose up -d postgres redis qdrant
-```
-
-### 3. Run the backend
-
+Backend:
 ```bash
 cd backend
 uv sync --extra dev
 uv run uvicorn alphalens.api.main:app --reload
 ```
 
-Backend endpoints:
-
-- API: `http://localhost:8000`
-- OpenAPI docs: `http://localhost:8000/docs`
-- Health: `http://localhost:8000/health`
-
-### 4. Run the frontend
-
+Frontend:
 ```bash
 cd frontend
 pnpm install
 pnpm dev
 ```
 
-Frontend app:
+## 11) Environment Variables
 
-- App: `http://localhost:3000`
+Use `.env.example` as the source of truth. Key groups:
+- app/runtime: `APP_ENV`, `LOG_LEVEL`, `APP_VERSION`
+- data services: `APP_DATABASE_URL`, `DATABASE_URL`, `REDIS_URL`, `QDRANT_URL`
+- auth/security: JWT secret and token settings
+- providers: `OPENAI_API_KEY`, `SERPER_API_KEY`, `FRED_API_KEY`, `ALPHA_VANTAGE_API_KEY`
+- routing: `NEXT_PUBLIC_API_URL`, `BACKEND_INTERNAL_URL`
+- feature flags: provider selection, fallback modes, speech, memory, cache
 
-## Docker Instructions
+## 12) Validation Commands
 
-To run the full stack in containers:
-
-```bash
-docker compose up --build
-```
-
-This launches:
-
-- `postgres`
-- `redis`
-- `qdrant`
-- `backend`
-- `frontend`
-
-## Deployment Targets
-
-AlphaLens is prepared for a split deployment:
-
-- `frontend/` on Vercel
-- `backend/` on Render or Railway
-- managed Postgres, Redis, and Qdrant services for production persistence and
-  retrieval
-
-See [docs/deployment.md](docs/deployment.md) for the environment variables,
-proxy setup, CORS checklist, managed service notes, and smoke-test checklist.
-
-Useful commands:
-
-```bash
-docker compose ps
-docker compose logs -f backend
-docker compose logs -f frontend
-docker compose down
-```
-
-The frontend uses `/api/backend` as a same-origin proxy path and routes
-server-side traffic to `BACKEND_INTERNAL_URL`.
-
-## Environment Variables
-
-Key variables are documented in `.env.example`. The most important groups are:
-
-### Core app
-
-- `APP_ENV`
-- `LOG_LEVEL`
-- `APP_VERSION`
-
-### Persistence and infrastructure
-
-- `DATABASE_URL`
-- `APP_DATABASE_URL`
-- `PERSISTENCE_BACKEND`
-- `REDIS_URL`
-- `QDRANT_URL`
-
-### Frontend routing
-
-- `NEXT_PUBLIC_API_URL`
-- `BACKEND_INTERNAL_URL`
-
-### Agent and provider configuration
-
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL`
-- `OPENAI_TEMPERATURE`
-- `OPENAI_TOP_P`
-- `LLM_ENABLED`
-- `ANTHROPIC_API_KEY`
-
-### Optional provider selection
-
-- `MARKET_DATA_PROVIDER`
-- `SEARCH_PROVIDER`
-- `MACRO_DATA_PROVIDER`
-- `SEC_PROVIDER`
-
-### Demo-stability and supporting services
-
-- `CACHE_ENABLED`
-- `CACHE_TTL_SECONDS`
-- `MEMORY_ENABLED`
-- `MEMORY_BACKEND`
-- `MEMORY_TTL_SECONDS`
-- `SPEECH_ENABLED`
-- `DEFAULT_RESPONSE_LANGUAGE`
-- `SPEECH_MAX_UPLOAD_BYTES`
-
-By default, most optional providers can run in `fallback` mode so reviewers can
-evaluate deterministic product behavior without external network dependencies.
-
-## Demo Flow
-
-Recommended reviewer flow:
-
-1. Open the dashboard and frame AlphaLens as an investment copilot with
-   portfolio, approvals, reports, scenarios, usage, and settings.
-2. Ask a portfolio or investment question in chat.
-3. Show the resulting decision card, evidence, and tool usage.
-4. Navigate to approvals to demonstrate human review.
-5. Generate or open a memo from the decision context.
-6. Run a deterministic scenario simulation.
-7. Open usage to show cost, event, and feedback tracking.
-8. End in settings to show providers, tools, and deterministic fallback mode.
-
-For a timed walkthrough with exact prompts, use
-[docs/demo_script.md](docs/demo_script.md).
-
-## Testing Instructions
-
-### Backend
-
+Backend:
 ```bash
 cd backend
+uv sync
 uv run pytest
 ```
 
-Optional backend linting:
-
-```bash
-uv run ruff check .
-uv run mypy src
-```
-
-### Frontend
-
+Frontend:
 ```bash
 cd frontend
 pnpm lint
 pnpm build
 ```
 
-If package-manager shims are unavailable in the shell, the local binaries can be
-run directly:
-
+Repository checks:
 ```bash
-node ./node_modules/eslint/bin/eslint.js src --ext .js,.jsx,.ts,.tsx
-node ./node_modules/next/dist/bin/next build
+git status
+git check-ignore .env
+git ls-files .env
 ```
 
-### Docker / healthchecks
+## 13) Demo Flow
 
-```bash
-docker compose up --build
-docker compose ps
+Use the short reviewer flow in [docs/demo_script.md](docs/demo_script.md):
+1. product framing and dashboard
+2. runtime status and fallback explanation
+3. knowledge base and RAG
+4. agent chat + approval workflow
+5. reports and scenarios
+6. usage and feedback
+
+## 14) Screenshots
+
+No `screenshots/` directory is currently included in this repository. Screenshot sections can be added later for:
+- dashboard;
+- chat decision card;
+- approval queue;
+- reports/scenarios;
+- usage/cost view.
+
+## 15) Limitations
+
+- AlphaLens does **not** execute real broker trades.
+- The platform is **not** financial advice.
+- Demo portfolio and seeded content are synthetic unless real providers are configured.
+- External providers may be unavailable; fallback providers are intentionally included for reliable local demos.
+- Some production controls (immutable audit, RBAC maturity, formal legal sign-off) are roadmap items.
+
+## 16) Production Roadmap
+
+See [docs/limitations_roadmap.md](docs/limitations_roadmap.md) for the full roadmap, including:
+- stronger compliance controls and audit capabilities;
+- enhanced RAG quality/evaluation pipeline;
+- richer market/fundamentals ingestion;
+- SaaS hardening (RBAC, 2FA, billing, observability).
+
+## 17) Repository Structure
+
+See [docs/repo_map.md](docs/repo_map.md) for full structure and command map.
+
+Top-level:
+```text
+backend/      FastAPI APIs, agent orchestration, tools, services, tests
+frontend/     Next.js application and UI components
+data/         Synthetic seed data and knowledge base files
+docs/         Architecture, deployment, evaluation, demo, roadmap
+.github/      CI workflows
+docker-compose.yml
+render.yaml
 ```
 
-## CI / GitHub Actions
+## 18) CI/CD Overview
 
-Pull requests and pushes to `main` or `master` run a small CI matrix that is
-designed to work without real provider keys:
+GitHub Actions workflows validate:
+- backend tests and quality checks;
+- frontend lint/build;
+- Docker build and compose validation;
+- security checks including secret scanning.
 
-- `backend-ci.yml`: installs `uv`, syncs backend dependencies, runs `pytest`,
-  `ruff`, and `mypy` with deterministic fallback environment variables
-- `frontend-ci.yml`: uses Node 20 and `pnpm` to run `lint` and `build` with
-  safe `/api/backend` defaults so the frontend does not need a live backend
-- `docker-ci.yml`: validates `docker compose config` and builds the backend and
-  frontend images
-- `security-ci.yml`: runs dependency review on pull requests and a repository
-  secret scan with Gitleaks
-
-All checks are intentionally lightweight and avoid requiring external API
-credentials.
-
-## Production Readiness
-
-AlphaLens includes deployment and validation scaffolding for practical
-production-style evaluation:
-
-- split deployment path (Vercel + Render/Railway + managed data services)
-- deterministic fallback posture when optional providers are unavailable
-- CI gates for backend, frontend, Docker, and security hygiene
-- documented smoke tests and validation report for reproducibility
-- Docker runtime parity for scenario and RAG data paths
-
-## Limitations
-
-- AlphaLens does not execute real trades.
-- Portfolio and some investigation data are synthetic or deterministic.
-- Deterministic fallbacks are intentionally used for demo and offline mode.
-- External APIs are optional and may be disabled entirely.
-- Some MVP services remain in-memory unless explicitly configured otherwise.
-- The project is not financial advice and should not be used for real
-  investment decisions.
-
-## Future Roadmap
-
-- Durable persistence for more services beyond approvals
-- Stronger investigation timelines and audit replay
-- Real document ingestion and richer RAG workflows
-- Additional market/news/provider adapters
-- Authentication, user scoping, and access control
-- Production-grade observability and evaluation workflows
-- Deeper policy engine and approval routing rules
-- Broker/execution integrations behind stricter guardrails
-
-## Submission Notes
-
-AlphaLens is optimized for reviewer evaluation:
-
-- the backend and frontend expose typed, inspectable contracts;
-- the UI is demo-ready and stable in deterministic mode;
-- human approval is a first-class workflow;
-- limitations and tradeoffs are explicitly documented;
-- validation artifacts are included in `docs/validation_report.md`.
+Workflow details: `.github/workflows`.

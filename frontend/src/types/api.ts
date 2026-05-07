@@ -115,6 +115,26 @@ export interface Citation {
   score?: number | null;
 }
 
+export interface ProviderMode {
+  name: string;
+  mode: string;
+  reason?: string | null;
+}
+
+export interface RAGSource {
+  document_title: string;
+  chunk_id: string;
+  score: number;
+  snippet: string;
+  source?: string | null;
+}
+
+export interface EvidenceSource {
+  title: string;
+  detail: string;
+  source_type: string;
+}
+
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
 export interface AgentDecision {
@@ -146,12 +166,54 @@ export interface ChatResponse {
   citations: Citation[];
   used_tools: string[];
   decision?: AgentDecision | null;
+  analysis: {
+    intent: string;
+    final_answer: string;
+    recommendation: Recommendation;
+    confidence: number;
+    approval_required: boolean;
+    approval_reason?: string | null;
+    tools_used: string[];
+    provider_modes: ProviderMode[];
+    evidence_items: EvidenceSource[];
+    rag_sources: RAGSource[];
+    rag_status?: string | null;
+    retrieval_mode?: string | null;
+    portfolio_snapshot_used?: string | null;
+    policy_rules_used: string[];
+    data_freshness?: string | null;
+    data_used: string[];
+    limitations: string[];
+    disclaimer?: string | null;
+    orchestration_trace: Record<string, unknown>;
+  };
 }
 
+export type SpeechProviderMode = "real" | "fallback";
+
 export interface TranscriptionResult {
-  text: string;
-  language?: string | null;
-  provider: string;
+  request_id?: string | null;
+  transcript: string;
+  detected_language?: string | null;
+  response_language?: string | null;
+  provider_mode?: SpeechProviderMode | null;
+  confidence?: number | null;
+  fallback_reason?: string | null;
+  demo_transcript?: string | null;
+  message?: string | null;
+  fallback_used?: boolean | null;
+  openai_called?: boolean | null;
+  openai_response_received?: boolean | null;
+}
+
+export interface SpeechCapabilities {
+  supported_mime_types: string[];
+  max_upload_mb: number;
+  supported_languages: string[];
+  provider_mode: SpeechProviderMode;
+  openai_key_configured: boolean;
+  microphone_transcription_available: boolean;
+  message: string;
 }
 
 export type UsageEventType =
@@ -186,6 +248,63 @@ export interface UsageSummary {
   estimated_cost_usd: number;
   tool_calls: number;
   llm_calls: number;
+}
+
+export interface RuntimeProviderStatus {
+  name: string;
+  status: "real" | "fallback" | "connected" | "disconnected" | "memory_fallback";
+  reason?: string | null;
+}
+
+export interface RuntimeStatus {
+  workspace_mode: "demo" | "live";
+  providers: RuntimeProviderStatus[];
+  data_sources: Record<string, string>;
+}
+
+export interface KnowledgeDocument {
+  document_id: string;
+  document_title: string;
+  source: string;
+  file_type: string;
+  chunk_count: number;
+  indexed_at: string;
+  collection: string;
+  status: string;
+}
+
+export interface KnowledgeStats {
+  document_count: number;
+  chunk_count: number;
+  collection: string;
+  vector_mode: string;
+  seeded_documents: number;
+  uploaded_documents: number;
+  seeded_source_titles: string[];
+  uploaded_source_titles: string[];
+}
+
+export interface KnowledgeUploadResponse {
+  document: KnowledgeDocument;
+  accepted_file_types: string[];
+  max_file_size_bytes: number;
+}
+
+export interface KnowledgeSearchResult {
+  document_id: string;
+  document_title: string;
+  chunk_id: string;
+  source: string;
+  score: number;
+  snippet: string;
+  section?: string | null;
+}
+
+export interface KnowledgeSearchResponse {
+  query: string;
+  k: number;
+  results: KnowledgeSearchResult[];
+  retrieval_mode: string;
 }
 
 export type FeedbackRating = "thumbs_up" | "thumbs_down";
@@ -255,6 +374,8 @@ export interface PlanUsage {
   limits: PlanLimits;
   capabilities: PlanCapabilities;
   current_month: string;
+  /** UTC rollover instant for monthly usage counters (ISO-8601). */
+  quota_reset_at: string;
 }
 
 export interface FeedbackSummary {
@@ -262,6 +383,15 @@ export interface FeedbackSummary {
   thumbs_up: number;
   thumbs_down: number;
   by_category: Record<string, number>;
+}
+
+export interface RecentFeedbackItem {
+  response_id?: string | null;
+  rating: FeedbackRating;
+  category?: FeedbackCategory | null;
+  comment?: string | null;
+  created_at: string;
+  message_preview?: string | null;
 }
 
 export type ReportType = "investment_memo" | "risk_review" | "portfolio_update";

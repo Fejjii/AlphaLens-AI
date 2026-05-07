@@ -9,7 +9,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-alphalens}"]
       interval: 5s
@@ -51,7 +51,9 @@ services:
       - .env
     environment:
       APP_ENV: ${APP_ENV:-dev}
-      DATABASE_URL: ${DATABASE_URL}
+      PERSISTENCE_BACKEND: postgres
+      APP_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-alphalens}:${POSTGRES_PASSWORD:-alphalens}@postgres:5432/${POSTGRES_DB:-alphalens}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-alphalens}:${POSTGRES_PASSWORD:-alphalens}@postgres:5432/${POSTGRES_DB:-alphalens}
       REDIS_URL: ${REDIS_URL}
       QDRANT_URL: ${QDRANT_URL}
     ports:
@@ -74,6 +76,7 @@ services:
       context: ./frontend
     environment:
       NEXT_PUBLIC_API_URL: /api/backend
+      NEXT_PUBLIC_DEMO_MODE: ${NEXT_PUBLIC_DEMO_MODE:-true}
       BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:8000}
     ports:
       - "3000:3000"
@@ -87,6 +90,6 @@ services:
         condition: service_healthy
 
 volumes:
-  pgdata:
+  postgres_data:
   redisdata:
   qdrant_storage:

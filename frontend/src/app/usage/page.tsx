@@ -13,7 +13,8 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
-import type { FeedbackSummary, PlanUsage, UsageEvent, UsageSummary } from "@/types/api";
+import { PLAN_USAGE_CHANGED_EVENT } from "@/lib/app-events";
+import type { FeedbackSummary, PlanLimits, PlanUsage, RecentFeedbackItem, UsageEvent, UsageSummary } from "@/types/api";
 
 function formatCost(value: number): string {
   return `$${value.toFixed(4)}`;
@@ -23,8 +24,27 @@ function formatTokens(value: number): string {
   return value.toLocaleString("en-US");
 }
 
-function formatPercent(value: number): string {
-  return `${(value * 100).toFixed(1)}%`;
+function formatPercent(fraction: number): string {
+  if (!Number.isFinite(fraction)) return "—";
+  return `${Math.round(fraction * 100)}%`;
+}
+
+const MONTHLY_USAGE_LIMIT_KEYS: Partial<Record<string, keyof PlanLimits>> = {
+  chats: "monthly_chats",
+  reports: "monthly_reports",
+  scenarios: "monthly_scenarios",
+  speech_uploads: "monthly_speech_uploads",
+  estimated_cost_usd: "monthly_estimated_cost_usd",
+};
+
+function formatUtcResetShort(isoUtc: string): string {
+  const d = Date.parse(isoUtc);
+  if (Number.isNaN(d)) return isoUtc;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(d);
 }
 
 function getEventLabel(eventType: UsageEvent["event_type"]): string {
@@ -50,37 +70,53 @@ export default function UsagePage() {
   const [summary, setSummary] = useState<UsageSummary | null>(null);
   const [events, setEvents] = useState<UsageEvent[]>([]);
   const [feedbackSummary, setFeedbackSummary] = useState<FeedbackSummary | null>(null);
+  const [recentFeedback, setRecentFeedback] = useState<RecentFeedbackItem[]>([]);
   const [planUsage, setPlanUsage] = useState<PlanUsage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
+    const fetchAll = () => {
+      setLoading(true);
+      setError(null);
 
-    Promise.all([
-      api.fetchUsageSummary(),
-      api.fetchUsageEvents(),
-      api.fetchFeedbackSummary(),
-      api.fetchMyPlanUsage(),
-    ])
-      .then(([summaryData, eventsData, feedbackData, planUsageData]) => {
-        if (cancelled) return;
-        setSummary(summaryData);
-        setEvents(eventsData);
-        setFeedbackSummary(feedbackData);
-        setPlanUsage(planUsageData);
-      })
-      .catch(() => {
-        if (!cancelled) setError("Unable to load usage data right now.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      Promise.all([
+        api.fetchUsageSummary(),
+        api.fetchUsageEvents(),
+        api.fetchFeedbackSummary(),
+        api.fetchRecentFeedback(),
+        api.fetchMyPlanUsage(),
+      ])
+        .then(([summaryData, eventsData, feedbackData, recentFeedbackData, planUsageData]) => {
+          if (cancelled) return;
+          setSummary(summaryData);
+          setEvents(eventsData);
+          setFeedbackSummary(feedbackData);
+          setRecentFeedback(recentFeedbackData);
+          setPlanUsage(planUsageData);
+        })
+        .catch(() => {
+          if (!cancelled) setError("Unable to load usage data right now.");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    };
 
+    fetchAll();
+
+    const onPlanChanged = () => {
+      fetchAll();
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener(PLAN_USAGE_CHANGED_EVENT, onPlanChanged);
+    }
     return () => {
       cancelled = true;
+      if (typeof window !== "undefined") {
+        window.removeEventListener(PLAN_USAGE_CHANGED_EVENT, onPlanChanged);
+      }
     };
   }, []);
 
@@ -192,17 +228,42 @@ export default function UsagePage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Monthly quota usage</CardTitle>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <Badge variant="outline" className="capitalize tabular tracking-normal">
+                      {planUsage.plan}
+                    </Badge>
+                    {planUsage.quota_reset_at ? (
+                      <span>Resets (UTC): {formatUtcResetShort(planUsage.quota_reset_at)}</span>
+                    ) : null}
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {Object.entries(planUsage.monthly_usage).map(([key, value]) => (
-                    <div
-                      key={key}
-                      className="flex items-center justify-between rounded-[0.875rem] border border-border/60 bg-background/45 px-3 py-2.5 text-sm"
-                    >
-                      <span className="capitalize text-muted-foreground">{key.replaceAll("_", " ")}</span>
-                      <span className="tabular">{String(value)}</span>
-                    </div>
-                  ))}
+                  {Object.entries(planUsage.monthly_usage).map(([key, value]) => {
+                    const limKey = MONTHLY_USAGE_LIMIT_KEYS[key];
+                    const limit =
+                      limKey !== undefined ? (planUsage.limits[limKey] as number | null | undefined) : undefined;
+                    const remaining = planUsage.remaining_quota[key];
+                    const suffix =
+                      typeof remaining === "number"
+                        ? ` · ${remaining} remaining`
+                        : remaining === null
+                          ? " · unlimited bucket"
+                          : "";
+                    const limitTxt = limit != null ? ` / ${limit} monthly limit` : "";
+                    return (
+                      <div
+                        key={key}
+                        className="flex flex-col gap-1 rounded-[0.875rem] border border-border/60 bg-background/45 px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <span className="capitalize text-muted-foreground">{key.replaceAll("_", " ")}</span>
+                        <span className="tabular text-foreground">
+                          {String(value)}
+                          {limitTxt}
+                          {suffix}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </CardContent>
               </Card>
               <Card>
@@ -255,11 +316,15 @@ export default function UsagePage() {
                 </CardHeader>
                 <CardContent className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-md border border-border/60 px-3 py-2">
-                    <div className="text-xs uppercase tracking-wider text-muted-foreground">Thumbs up</div>
+                    <div className="text-xs uppercase tracking-wider text-muted-foreground">Total feedback</div>
+                    <div className="mt-1 text-lg font-semibold">{feedbackSummary?.total_feedback ?? 0}</div>
+                  </div>
+                  <div className="rounded-md border border-border/60 px-3 py-2">
+                    <div className="text-xs uppercase tracking-wider text-muted-foreground">Positive</div>
                     <div className="mt-1 text-lg font-semibold">{feedbackSummary?.thumbs_up ?? 0}</div>
                   </div>
                   <div className="rounded-md border border-border/60 px-3 py-2">
-                    <div className="text-xs uppercase tracking-wider text-muted-foreground">Thumbs down</div>
+                    <div className="text-xs uppercase tracking-wider text-muted-foreground">Negative</div>
                     <div className="mt-1 text-lg font-semibold">{feedbackSummary?.thumbs_down ?? 0}</div>
                   </div>
                   <div className="rounded-md border border-border/60 px-3 py-2">
@@ -270,6 +335,29 @@ export default function UsagePage() {
                         .join(" · ") || "No categories yet"}
                     </div>
                   </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Latest feedback items</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {recentFeedback.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No feedback has been submitted yet.</p>
+                  ) : (
+                    recentFeedback.slice(0, 5).map((item, index) => (
+                      <div key={`${item.response_id ?? "no-response"}-${index}`} className="rounded-[0.875rem] border border-border/60 bg-background/45 px-3 py-2.5">
+                        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                          <span>{item.rating}</span>
+                          <span>{new Date(item.created_at).toLocaleString()}</span>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {item.category ?? "uncategorized"} · response {item.response_id ?? "n/a"}
+                        </div>
+                        {item.comment ? <p className="mt-1 text-sm">{item.comment}</p> : null}
+                      </div>
+                    ))
+                  )}
                 </CardContent>
               </Card>
               <BreakdownCard

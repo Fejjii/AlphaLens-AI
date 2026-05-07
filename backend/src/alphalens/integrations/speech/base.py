@@ -12,5 +12,13 @@ class SpeechError(Exception):
 
 
 class SpeechClient(Protocol):
-    def transcribe_audio(self, file_bytes: bytes, filename: str) -> TranscriptionResult:
+    def transcribe_audio(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        *,
+        content_type: str | None = None,
+        request_id: str | None = None,
+        frontend_created_filename: str | None = None,
+    ) -> TranscriptionResult:
         ...

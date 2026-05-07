@@ -36,6 +36,7 @@ class PositionStat:
     strategy_bucket: str
     market_value: float
     weight: float
+    return_estimate: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +103,9 @@ def analyze_portfolio(*, holdings_path: Path) -> PortfolioAnalysis:
                 strategy_bucket=h.strategy_bucket,
                 market_value=h.market_value,
                 weight=weight,
+                return_estimate=(h.current_price - h.avg_cost) / h.avg_cost
+                if h.avg_cost
+                else 0.0,
             )
         )
         sector_exposure[h.sector] = sector_exposure.get(h.sector, 0.0) + weight
@@ -146,6 +150,16 @@ def make_portfolio_tool(*, holdings_path: Path) -> Tool:
 
 
 def _to_dict(analysis: PortfolioAnalysis) -> dict:
+    weighted_return = sum(p.weight * p.return_estimate for p in analysis.positions)
+    top_contributors = sorted(
+        analysis.positions,
+        key=lambda p: p.return_estimate,
+        reverse=True,
+    )[:3]
+    laggards = sorted(
+        analysis.positions,
+        key=lambda p: p.return_estimate,
+    )[:3]
     return {
         "total_value": analysis.total_value,
         "position_count": analysis.position_count,
@@ -154,4 +168,14 @@ def _to_dict(analysis: PortfolioAnalysis) -> dict:
         "positions": [asdict(p) for p in analysis.positions],
         "top_position": asdict(analysis.top_position) if analysis.top_position else None,
         "hhi": analysis.hhi,
+        "estimated_one_month_return": weighted_return,
+        "estimated_day_pnl": analysis.total_value * (weighted_return / 21 if weighted_return else 0.0),
+        "top_contributors": [
+            {"symbol": p.symbol, "return": p.return_estimate}
+            for p in top_contributors
+        ],
+        "laggards": [
+            {"symbol": p.symbol, "return": p.return_estimate}
+            for p in laggards
+        ],
     }

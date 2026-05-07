@@ -22,8 +22,9 @@ from typing import Any
 
 from alphalens.agents.state import AgentState
 from alphalens.infrastructure.observability.langsmith import trace_node, trace_tool_call
-from alphalens.integrations.llm.fallback_client import needs_web_search
+from alphalens.integrations.llm.fallback_client import needs_rag_explicitly, needs_web_search
 from alphalens.services.llm_service import LLMService
+from alphalens.tools.policy import POLICY
 from alphalens.tools.registry import ToolRegistry, ToolResult
 
 NodeFn = Callable[[AgentState], AgentState]
@@ -83,7 +84,7 @@ def _needs_sec(text: str, intent: str, tickers: list[str]) -> bool:
     lower = text.lower()
     if any(kw in lower for kw in _SEC_KEYWORDS):
         return True
-    return intent in {"research", "trade_idea"} and bool(tickers)
+    return intent in {"sec_filings_question", "investment_recommendation"} and bool(tickers)
 
 
 def _needs_macro(text: str, intent: str) -> bool:
@@ -137,13 +138,15 @@ def make_interpret_node(llm: LLMService) -> NodeFn:
             metadata=meta,
         ):
             classification = llm.classify_intent(message=conversation_text or text)
+            rag_requested = needs_rag_explicitly(text, classification.intent)
             tickers = list(classification.tickers)
             output: AgentState = {
                 "detected_language": state.get("detected_language"),
                 "intent": classification.intent,
                 "tickers": tickers,
                 "needs_market_data": classification.needs_market_data,
-                "needs_rag": classification.needs_rag,
+                "needs_rag": classification.needs_rag or rag_requested,
+                "rag_requested": rag_requested,
                 "needs_portfolio": classification.needs_portfolio,
                 "needs_risk_check": classification.needs_risk_check,
                 # OR-merge LLM hint with the keyword heuristic so behaviour is
@@ -227,6 +230,22 @@ def make_gather_node(registry: ToolRegistry) -> NodeFn:
             inputs=node_inputs,
             metadata={"conversation_id": state.get("conversation_id")},
         ):
+            if state.get("intent") in {"policy_breach_check", "rag_policy_question", "investment_recommendation", "risk_check"}:
+                evidence.append(
+                    {
+                        "tool": "policy_rules",
+                        "summary": (
+                            "Applied IPS thresholds: single-name max 15%, trim threshold 12%, "
+                            "sector caps from policy matrix."
+                        ),
+                        "data": {
+                            "single_name_max": POLICY.single_name_max_weight,
+                            "single_name_trim_threshold": POLICY.single_name_trim_threshold,
+                            "sector_limits": POLICY.sector_max_weight,
+                        },
+                    }
+                )
+                used.append("policy_rules")
             if needs_portfolio:
                 _run("portfolio_analyze")
             if needs_risk_check:
@@ -244,11 +263,6 @@ def make_gather_node(registry: ToolRegistry) -> NodeFn:
                 # Web search complements RAG with fresh external context;
                 # never replaces it.
                 _run("web_search", query=_last_user_message(state))
-
-            # Fallback: even general queries get KB context so we always have
-            # *something* to ground the answer in.
-            if not used and registry.has("rag_retrieve"):
-                _run("rag_retrieve", query=_last_user_message(state))
 
         return {
             "evidence": evidence,
@@ -352,7 +366,7 @@ def decide_node(state: AgentState) -> AgentState:
         requires_approval = False
         reasoning_extra: list[str] = []
 
-        if status == "violations":
+        if status == "violations" and intent in {"policy_breach_check", "risk_review", "investment_recommendation", "risk_check", "trade_idea"}:
             recommendation = "escalate"
             requires_approval = True
             risk_level = "high"
@@ -362,7 +376,7 @@ def decide_node(state: AgentState) -> AgentState:
             )
         elif status == "warnings" and any(
             f.get("code") == "single_name_trim" for f in findings
-        ):
+        ) and intent in {"investment_recommendation", "trade_idea"}:
             recommendation = "trim"
             requires_approval = True
             risk_level = "medium"
@@ -371,7 +385,7 @@ def decide_node(state: AgentState) -> AgentState:
             reasoning_extra.append(
                 f"Recommend trimming {', '.join(offenders)} above policy trim threshold."
             )
-        elif intent == "trade_idea":
+        elif intent in {"investment_recommendation", "trade_idea"}:
             recommendation = "buy"
             requires_approval = True
             # Trade idea without a full risk picture: surface lower confidence so
@@ -381,11 +395,20 @@ def decide_node(state: AgentState) -> AgentState:
             reasoning_extra.append(
                 "Trade idea detected; human approval required per IPS section 7."
             )
-        elif intent == "risk_check":
+        elif intent in {"risk_review", "policy_breach_check", "risk_check"}:
             recommendation = "hold"
             risk_level = "low"
             confidence = 0.7
             reasoning_extra.append("No policy breaches; current allocation is within limits.")
+        elif intent in {"portfolio_performance", "portfolio_review"}:
+            recommendation = "inform"
+            risk_level = "low"
+            confidence = 0.78 if intent == "portfolio_performance" else 0.7
+            reasoning_extra.append("Performance request detected; prioritizing factual portfolio outcomes.")
+        elif intent in {"rag_policy_question", "market_news_question", "sec_filings_question", "macro_question", "general_question"}:
+            recommendation = "inform"
+            risk_level = "low"
+            confidence = 0.7
         else:
             recommendation = "inform"
             risk_level = "low"
@@ -432,6 +455,33 @@ def _format_answer(
     extras: list[str],
     state: AgentState,
 ) -> str:
+    if intent == "portfolio_performance":
+        return _format_performance_answer(state, extras)
+    if intent == "portfolio_review":
+        return _format_generic_evidence_answer("Portfolio review", state, extras)
+    if intent == "policy_breach_check":
+        return _format_policy_breach_answer(state, extras)
+    if intent == "risk_check":
+        return _format_policy_breach_answer(state, extras)
+    if intent == "rag_policy_question":
+        return _format_rag_policy_answer(state, extras)
+    if intent == "research":
+        return _format_rag_policy_answer(state, extras)
+    if intent == "investment_recommendation":
+        return _format_investment_recommendation_answer(state, recommendation, extras)
+    if intent == "trade_idea":
+        return _format_investment_recommendation_answer(state, recommendation, extras)
+    if intent == "market_news_question":
+        return _format_generic_evidence_answer("Market and news summary", state, extras)
+    if intent == "market_news":
+        return _format_generic_evidence_answer("Market and news summary", state, extras)
+    if intent == "sec_filings_question":
+        return _format_generic_evidence_answer("SEC filings summary", state, extras)
+    if intent == "macro_question":
+        return _format_generic_evidence_answer("Macro overview", state, extras)
+    if intent == "risk_review":
+        return _format_generic_evidence_answer("Risk review", state, extras)
+
     language = state.get("response_language")
     if language == "de":
         head = f"Absicht: {intent}. Empfehlung: {recommendation}."
@@ -456,3 +506,148 @@ def _format_answer(
     tools = state.get("used_tools", [])
     tail = f" Tools consulted: {', '.join(tools)}." if tools else ""
     return f"{head} {body}{tail}".strip()
+
+
+def _format_policy_breach_answer(state: AgentState, extras: list[str]) -> str:
+    risk_data = _evidence_data(state, "risk_check") or {}
+    findings = risk_data.get("findings") or []
+    if not isinstance(findings, list):
+        findings = []
+    lines = ["Policy breach check:"]
+    if findings:
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            subject = str(finding.get("subject", "Portfolio"))
+            message = str(finding.get("message", "Threshold condition detected"))
+            severity = str(finding.get("severity", "medium"))
+            observed = finding.get("observed")
+            limit = finding.get("limit")
+            if isinstance(observed, (int, float)) and isinstance(limit, (int, float)):
+                lines.append(
+                    f"- {subject}: {message} | threshold {float(limit) * 100:.2f}% vs current {float(observed) * 100:.2f}% | severity: {severity}"
+                )
+            else:
+                lines.append(f"- {subject}: {message} (severity: {severity})")
+    else:
+        lines.append("- No active policy breaches detected in current snapshot.")
+    lines.append("- Approval implication: recommendations that trim, rebalance, buy, or sell require committee approval.")
+    lines.append("- Suggested next review step: validate the flagged positions and route any trade action to approvals.")
+    if extras:
+        lines.append(f"- Notes: {' '.join(extras)}")
+    return "\n".join(lines)
+
+
+def _format_rag_policy_answer(state: AgentState, extras: list[str]) -> str:
+    rag_data = _evidence_data(state, "rag_retrieve") or {}
+    chunks = rag_data.get("chunks") if isinstance(rag_data, dict) else []
+    lines = ["Policy summary from knowledge base:"]
+    if isinstance(chunks, list) and chunks:
+        for chunk in chunks[:4]:
+            if not isinstance(chunk, dict):
+                continue
+            source = str(chunk.get("source", "knowledge_base"))
+            text = str(chunk.get("text", "")).strip().replace("\n", " ")
+            snippet = text[:180] + ("..." if len(text) > 180 else "")
+            lines.append(f"- {source}: {snippet}")
+    else:
+        lines.append("- No policy chunks were retrieved for this question.")
+        lines.append(
+            f"- Structured fallback: single-name max {POLICY.single_name_max_weight * 100:.0f}%, trim threshold {POLICY.single_name_trim_threshold * 100:.0f}%."
+        )
+    if extras:
+        lines.append(f"- Notes: {' '.join(extras)}")
+    return "\n".join(lines)
+
+
+def _format_investment_recommendation_answer(
+    state: AgentState,
+    recommendation: str,
+    extras: list[str],
+) -> str:
+    tickers = state.get("tickers", []) or _default_tickers()
+    lines = [f"Investment recommendation: {recommendation}."]
+    lines.append(f"- Evaluated symbols: {', '.join(tickers)}")
+    portfolio = _evidence_data(state, "portfolio_analyze") or {}
+    positions = portfolio.get("positions") if isinstance(portfolio, dict) else []
+    nvda_position = None
+    if isinstance(positions, list):
+        for item in positions:
+            if isinstance(item, dict) and str(item.get("symbol", "")).upper() == "NVDA":
+                nvda_position = item
+                break
+    if isinstance(nvda_position, dict):
+        weight = nvda_position.get("weight")
+        if isinstance(weight, (int, float)):
+            lines.append(f"- NVDA current weight: {float(weight) * 100:.2f}%")
+    lines.append(f"- Policy trim threshold: {POLICY.single_name_trim_threshold * 100:.2f}%")
+    rag_data = _evidence_data(state, "rag_retrieve") or {}
+    chunks = rag_data.get("chunks") if isinstance(rag_data, dict) else []
+    if isinstance(chunks, list) and chunks:
+        lines.append("- Internal policy context was included from the knowledge base.")
+        for chunk in chunks[:3]:
+            if not isinstance(chunk, dict):
+                continue
+            source = str(chunk.get("source", "knowledge_base"))
+            snippet = str(chunk.get("text", "")).replace("\n", " ").strip()[:140]
+            lines.append(f"- Evidence: {source} -> {snippet}")
+    else:
+        lines.append("- Internal policy context not retrieved; recommendation is based on non-RAG evidence.")
+    lines.append("- Approval requirement: committee approval is required before execution actions.")
+    lines.append("- Limitations: this recommendation is based on synthetic/demo holdings unless live providers are configured.")
+    if extras:
+        lines.append(f"- Risk notes: {' '.join(extras)}")
+    return "\n".join(lines)
+
+
+def _format_generic_evidence_answer(
+    title: str,
+    state: AgentState,
+    extras: list[str],
+) -> str:
+    lines = [f"{title}:"]
+    if state.get("used_tools"):
+        lines.append(f"- Tools consulted: {', '.join(state['used_tools'])}")
+    else:
+        lines.append("- No external tools were required for this answer.")
+    if extras:
+        lines.append(f"- Notes: {' '.join(extras)}")
+    return "\n".join(lines)
+
+
+def _format_performance_answer(state: AgentState, extras: list[str]) -> str:
+    portfolio = _evidence_data(state, "portfolio_analyze") or {}
+    total_value = portfolio.get("total_value")
+    estimated_return = portfolio.get("estimated_one_month_return")
+    day_pnl = portfolio.get("estimated_day_pnl")
+    top = portfolio.get("top_contributors") or []
+    laggards = portfolio.get("laggards") or []
+
+    lines = ["Portfolio performance snapshot (demo data):"]
+    if isinstance(total_value, (int, float)):
+        lines.append(f"- Current NAV: ${float(total_value):,.0f}")
+    if isinstance(estimated_return, (int, float)):
+        lines.append(f"- Estimated 1M return: {float(estimated_return) * 100:.2f}%")
+    elif isinstance(day_pnl, (int, float)):
+        lines.append(f"- Day P&L proxy: ${float(day_pnl):,.0f}")
+    else:
+        lines.append("- 1M return and day P&L are unavailable in the current synthetic snapshot.")
+
+    if top:
+        top_text = ", ".join(
+            f"{item.get('symbol', 'N/A')} ({float(item.get('return', 0.0)) * 100:.2f}%)"
+            for item in top[:3]
+        )
+        lines.append(f"- Top contributors: {top_text}")
+    if laggards:
+        lag_text = ", ".join(
+            f"{item.get('symbol', 'N/A')} ({float(item.get('return', 0.0)) * 100:.2f}%)"
+            for item in laggards[:3]
+        )
+        lines.append(f"- Laggards: {lag_text}")
+
+    lines.append("- Benchmark comparison unavailable unless external market provider is configured.")
+    lines.append("- Limitations: values are derived from synthetic/demo holdings.")
+    if extras:
+        lines.append(f"- Risk notes: {' '.join(extras)}")
+    return "\n".join(lines)

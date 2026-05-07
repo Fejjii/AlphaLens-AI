@@ -74,6 +74,48 @@ class AgentDecision(APIModel):
     policy_flags: list[str] = Field(default_factory=list)
 
 
+class ProviderMode(APIModel):
+    name: str
+    mode: str
+    reason: str | None = None
+
+
+class RAGSource(APIModel):
+    document_title: str
+    chunk_id: str
+    score: float = Field(ge=0.0, le=1.0)
+    snippet: str
+    source: str | None = None
+
+
+class EvidenceSource(APIModel):
+    title: str
+    detail: str
+    source_type: str = "tool"
+
+
+class ChatAnalysis(APIModel):
+    intent: str
+    final_answer: str
+    recommendation: Recommendation
+    confidence: float = Field(default=0.7, ge=0.0, le=1.0)
+    approval_required: bool = False
+    approval_reason: str | None = None
+    tools_used: list[str] = Field(default_factory=list)
+    provider_modes: list[ProviderMode] = Field(default_factory=list)
+    evidence_items: list[EvidenceSource] = Field(default_factory=list)
+    rag_sources: list[RAGSource] = Field(default_factory=list)
+    rag_status: str | None = None
+    retrieval_mode: str | None = None
+    portfolio_snapshot_used: str | None = None
+    policy_rules_used: list[str] = Field(default_factory=list)
+    data_freshness: str | None = None
+    data_used: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    disclaimer: str | None = None
+    orchestration_trace: dict[str, Any] = Field(default_factory=dict)
+
+
 class ChatRequest(APIModel):
     conversation_id: str | None = Field(
         default=None,
@@ -91,3 +133,4 @@ class ChatResponse(APIModel):
     citations: list[Citation] = Field(default_factory=list)
     used_tools: list[str] = Field(default_factory=list)
     decision: AgentDecision | None = None
+    analysis: ChatAnalysis

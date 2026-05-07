@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
   const nextPath = searchParams.get("next") || "/";
 
@@ -46,7 +47,11 @@ export default function LoginPage() {
                 await login({ email, password });
                 router.replace(nextPath);
               } catch {
-                setError("Unable to sign in with those credentials.");
+                setError(
+                  isDemoMode
+                    ? "Unable to sign in. Check your email and password. If you recently reset Docker volumes, create a new account because demo database data may have been deleted."
+                    : "Unable to sign in. Check your email and password.",
+                );
               } finally {
                 setSubmitting(false);
               }
