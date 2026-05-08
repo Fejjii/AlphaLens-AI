@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import type {
   Approval,
+  ApprovalStatus,
   PortfolioSummary,
   UsageSummary,
 } from "@/types/api";
@@ -46,7 +47,10 @@ async function withServerFallback<T>(promise: Promise<T>, fallback: T): Promise<
 export const serverApi = {
   portfolioSummary: () =>
     withServerFallback(serverRequest<PortfolioSummary>("/portfolio/summary"), mockPortfolio),
-  approvals: () => withServerFallback(serverRequest<Approval[]>("/approvals"), mockApprovals),
+  approvals: (status?: ApprovalStatus) => {
+    const query = status ? `?status=${encodeURIComponent(status)}` : "";
+    return withServerFallback(serverRequest<Approval[]>(`/approvals${query}`), mockApprovals);
+  },
   fetchUsageSummary: () =>
     withServerFallback(serverRequest<UsageSummary>("/usage/summary"), mockUsageSummary),
 };

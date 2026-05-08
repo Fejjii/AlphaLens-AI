@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -109,6 +110,28 @@ def test_approval_service_works_with_repository() -> None:
     assert decided.status is ApprovalStatus.APPROVED
     assert decided.reviewer_note == "Approved"
     assert decided.decided_at is not None
+
+
+def test_approval_service_rejects_non_pending_transition() -> None:
+    repo = InMemoryApprovalRepository()
+    service = ApprovalsService(repository=repo)
+    record = _sample_record("apv_transition_guard")
+    repo.create(
+        record.model_copy(
+            update={
+                "status": ApprovalStatus.APPROVED,
+                "reviewer_note": "Already approved.",
+                "decided_at": datetime.now(tz=UTC),
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="cannot be decided again"):
+        service.decide_approval(
+            "apv_transition_guard",
+            ApprovalDecision(status=ApprovalStatus.REJECTED, reviewer_note="Should fail"),
+            user_id="usr_repo_test",
+        )
 
 
 def test_sqlalchemy_repository_persists_approval_with_sqlite() -> None:

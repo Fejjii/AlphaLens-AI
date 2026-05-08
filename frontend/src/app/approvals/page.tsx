@@ -36,7 +36,7 @@ export default function ApprovalsPage() {
     let cancelled = false;
     setLoading(true);
     api
-      .fetchApprovals()
+      .listApprovals()
       .then((items) => {
         if (!cancelled) setApprovals(items);
       })
@@ -61,10 +61,17 @@ export default function ApprovalsPage() {
   const handleDecide = useCallback(
     async (approvalId: string, status: ApprovalDecisionStatus) => {
       try {
-        const updated = await api.decideApproval(approvalId, { status });
-        setApprovals((prev) =>
-          prev.map((a) => (a.approval_id === approvalId ? updated : a)),
-        );
+        if (status === "approved") {
+          await api.approveApproval(approvalId);
+        } else if (status === "rejected") {
+          await api.rejectApproval(approvalId);
+        } else if (status === "needs_more_analysis") {
+          await api.requestMoreAnalysis(approvalId);
+        } else {
+          await api.decideApproval(approvalId, { status });
+        }
+        const refreshed = await api.listApprovals();
+        setApprovals(refreshed);
         setFlash({
           kind: "success",
           message: `Approval ${approvalId} ${DECISION_LABEL[status]}.`,

@@ -118,6 +118,52 @@ async def test_needs_more_analysis_flow(
     assert body["reviewer_note"] == "Add downside scenario analysis."
 
 
+async def test_repeat_decision_on_resolved_approval_returns_400(
+    client: AsyncClient,
+    auth_session: dict[str, object],
+) -> None:
+    user_id = str(auth_session["user"]["id"])  # type: ignore[index]
+    auth_headers = auth_session["headers"]  # type: ignore[assignment]
+    approval_id = _seed_pending_approval(user_id=user_id)
+
+    first = await client.post(
+        f"/approvals/{approval_id}/decision",
+        json={"status": "approved", "reviewer_note": "Approved."},
+        headers=auth_headers,
+    )
+    assert first.status_code == 200
+
+    second = await client.post(
+        f"/approvals/{approval_id}/decision",
+        json={"status": "rejected", "reviewer_note": "Trying to reverse after decision."},
+        headers=auth_headers,
+    )
+    assert second.status_code == 400
+    assert "cannot be decided again" in str(second.json().get("detail", ""))
+
+
+async def test_pending_query_excludes_resolved_approvals(
+    client: AsyncClient,
+    auth_session: dict[str, object],
+) -> None:
+    user_id = str(auth_session["user"]["id"])  # type: ignore[index]
+    auth_headers = auth_session["headers"]  # type: ignore[assignment]
+    approval_id = _seed_pending_approval(user_id=user_id)
+
+    decide = await client.post(
+        f"/approvals/{approval_id}/decision",
+        json={"status": "approved"},
+        headers=auth_headers,
+    )
+    assert decide.status_code == 200
+
+    response = await client.get("/approvals", params={"status": "pending"}, headers=auth_headers)
+    assert response.status_code == 200
+    approvals = response.json()
+    assert all(item["status"] == "pending" for item in approvals)
+    assert all(item["approval_id"] != approval_id for item in approvals)
+
+
 async def test_approval_record_copies_risk_level_and_confidence_from_decision() -> None:
     deps._approvals_service.cache_clear()
     service = deps.get_approvals_service()

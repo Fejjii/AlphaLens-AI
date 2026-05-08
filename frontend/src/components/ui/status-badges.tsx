@@ -39,7 +39,7 @@ const APPROVAL_STATUS_LABEL: Record<ApprovalStatus, string> = {
   pending: "Pending",
   approved: "Approved",
   rejected: "Rejected",
-  needs_more_analysis: "Needs Analysis",
+  needs_more_analysis: "Needs more analysis",
   cancelled: "Cancelled",
 };
 

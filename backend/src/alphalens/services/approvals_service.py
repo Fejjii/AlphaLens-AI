@@ -64,6 +64,10 @@ class ApprovalsService:
         record = self._repository.get(approval_id, user_id=user_id)
         if record is None:
             return None
+        if record.status is not ApprovalStatus.PENDING:
+            raise ValueError(
+                f"Approval '{approval_id}' is already '{record.status.value}' and cannot be decided again."
+            )
         updated = record.model_copy(
             update={
                 "status": decision.status,

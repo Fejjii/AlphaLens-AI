@@ -52,6 +52,8 @@ Thumbs.db
 # Docker volumes (host-mounted)
 data/postgres/
 data/qdrant/
+backend/data/knowledge_base/uploads/*
+!backend/data/knowledge_base/uploads/.gitkeep
 
 # Logs
 *.log

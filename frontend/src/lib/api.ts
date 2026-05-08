@@ -142,6 +142,14 @@ async function request<T>(
       }
       throw new ApiError(formatErrorDetail(detail) ?? `Request failed: ${response.status}`, response.status, detail);
     }
+    if (process.env.NODE_ENV === "development" && path.startsWith("/approvals")) {
+      // eslint-disable-next-line no-console
+      console.debug("[approvals] request success", {
+        route: path,
+        method: init.method ?? "GET",
+        response_status: response.status,
+      });
+    }
     return (await response.json()) as T;
   } finally {
     clearTimeout(timeout);
@@ -165,14 +173,39 @@ async function fetchApprovals(): Promise<Approval[]> {
   return withFallback(request<Approval[]>("/approvals"), mockApprovals);
 }
 
+async function listApprovals(status?: Approval["status"]): Promise<Approval[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  return withFallback(request<Approval[]>(`/approvals${query}`), mockApprovals);
+}
+
 async function decideApproval(
   approvalId: string,
   payload: ApprovalDecisionPayload,
 ): Promise<Approval> {
+  if (process.env.NODE_ENV === "development") {
+    // eslint-disable-next-line no-console
+    console.debug("[approvals] decision request", {
+      approval_id: approvalId,
+      action: payload.status,
+      route: `/approvals/${approvalId}/decision`,
+    });
+  }
   return request<Approval>(`/approvals/${approvalId}/decision`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+async function approveApproval(approvalId: string): Promise<Approval> {
+  return decideApproval(approvalId, { status: "approved" });
+}
+
+async function rejectApproval(approvalId: string): Promise<Approval> {
+  return decideApproval(approvalId, { status: "rejected" });
+}
+
+async function requestMoreAnalysis(approvalId: string): Promise<Approval> {
+  return decideApproval(approvalId, { status: "needs_more_analysis" });
 }
 
 async function fetchUsageSummary(): Promise<UsageSummary> {
@@ -193,8 +226,12 @@ export const api = {
   portfolioSummary: () =>
     withFallback(request<PortfolioSummary>("/portfolio/summary"), mockPortfolio),
   approvals: fetchApprovals,
+  listApprovals,
   fetchApprovals,
   decideApproval,
+  approveApproval,
+  rejectApproval,
+  requestMoreAnalysis,
   fetchUsageSummary,
   fetchUsageEvents,
   register: (payload: { email: string; password: string; full_name: string }) =>

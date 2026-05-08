@@ -1,7 +1,7 @@
-import { ClipboardCheck, Inbox } from "lucide-react";
+import { Inbox } from "lucide-react";
 
 import { AlertCard } from "@/components/cards/AlertCard";
-import { ApprovalCard } from "@/components/cards/ApprovalCard";
+import { PendingApprovalsPanel } from "@/components/dashboard/PendingApprovalsPanel";
 import { MetricCard } from "@/components/cards/MetricCard";
 import { UsageMetricCard } from "@/components/cards/UsageMetricCard";
 import { EmptyState } from "@/components/layout/EmptyState";
@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage() {
   const [portfolio, approvals, usageSummary] = await Promise.all([
     serverApi.portfolioSummary(),
-    serverApi.approvals(),
+    serverApi.approvals("pending"),
     serverApi.fetchUsageSummary(),
   ]);
 
@@ -146,21 +146,7 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        <div className="space-y-3">
-          <h2 className="text-sm font-medium text-muted-foreground">Pending approvals</h2>
-          {approvals.length === 0 ? (
-            <EmptyState
-              icon={ClipboardCheck}
-              title="No approvals pending"
-              description="Agent escalations will surface here when a human decision is required."
-              eyebrow="Review queue"
-            />
-          ) : (
-            approvals.slice(0, 3).map((a) => (
-              <ApprovalCard key={a.approval_id} approval={a} />
-            ))
-          )}
-        </div>
+        <PendingApprovalsPanel initialApprovals={approvals} />
       </div>
     </div>
   );
