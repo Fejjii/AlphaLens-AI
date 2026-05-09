@@ -1,99 +1,62 @@
 # RAG System
 
-## 1) What RAG Means in AlphaLens
+## 1) Seeded Documents
 
-In AlphaLens, Retrieval-Augmented Generation (RAG) grounds agent responses with internal policy/research documents and user-uploaded knowledge. This reduces unsupported claims and improves explainability in investment recommendations.
+AlphaLens seeds a small internal corpus in `data/knowledge_base`, including policy/risk/research style documents used during demos and tests.
 
-## 2) What Documents Are Indexed
+## 2) Uploaded `.md` and `.txt` Documents
 
-Indexed sources include:
-- internal knowledge base documents under `data/knowledge_base/`;
-- uploaded user documents from the knowledge base upload workflow.
+Users can upload markdown/text knowledge docs through the Knowledge Base workflow. Uploaded files are validated and ingested into the same retrieval system as seeded docs.
 
-## 3) How Upload Works
+## 3) Chunking and Metadata
 
-High-level flow:
-- user uploads a supported document through the knowledge base UI/API;
-- backend validates and normalizes content;
-- ingestion service chunks and embeds text;
-- embeddings + metadata are written to Qdrant;
-- document becomes retrievable for future agent requests.
+Ingestion splits docs into chunks and stores metadata such as source path/title, chunk index, and ingest context so responses can surface traceable `rag_sources`.
 
-## 4) Supported Upload Formats
+## 4) Qdrant Retrieval
 
-Current implementation is optimized for markdown/text-style ingestion in local/demo mode. Additional enterprise formats (PDF, DOCX, HTML with robust parsing) are roadmap enhancements.
+Chunks are embedded and stored in the configured Qdrant collection (`RAG_COLLECTION`). Query-time retrieval returns top relevant chunks for synthesis.
 
-## 5) Chunking
+## 5) Deterministic Fallback Retrieval
 
-Documents are split into manageable chunks to balance:
-- retrieval recall;
-- token efficiency;
-- citation granularity.
+When vector retrieval is unavailable or sparse in demo/test contexts, deterministic fallback retrieval keeps responses stable and prevents hard failures.
 
-Chunk strategy keeps semantic coherence while preventing oversized context windows.
+## 6) When RAG Is Triggered
 
-## 6) Metadata
+RAG is triggered for:
 
-Each chunk stores metadata used for filtering, tracing, and citations, typically:
-- source identifier/path;
-- document title or label;
-- ingest timestamp;
-- chunk order/index.
+- Internal policy questions
+- Risk playbook questions
+- Committee notes queries
+- Research notes queries
+- Uploaded document queries
+- Explicit RAG prompts (for example “use RAG” or “source from KB”)
 
-## 7) Embeddings
+## 7) RAG Response Formatting
 
-Chunks are transformed into embeddings and indexed in Qdrant. Embedding model selection and dimensions are configured in backend settings.
+Investment responses are formatted to show:
 
-## 8) Qdrant Retrieval
+- Clean executive answer (no raw chunk dump)
+- Key evidence in analysis/decision context
+- Collapsed RAG sources for reviewer traceability
+- Technical trace metadata (tools selected/executed/skipped, limitations)
 
-At query time:
-- user question is embedded;
-- top-k relevant chunks are retrieved from Qdrant collection;
-- retrieved evidence is sent to the agent synthesis stage.
+## 8) Limitations
 
-## 9) Lexical Fallback
+- Demo corpus is intentionally small
+- Embedding/retrieval quality depends on provider and corpus quality
+- Source quality and document structure affect answer quality
+- Ingestion scope currently focuses on `.md`/`.txt` workflows
 
-If vector retrieval is unavailable or sparse, lexical/fallback behavior can still provide baseline context in deterministic demo mode.
-
-## 10) How RAG Is Triggered
-
-RAG is triggered when intent detection identifies policy/document-reliant questions or when the workflow requires evidence grounding for recommendations and summaries.
-
-## 11) How RAG Sources Are Displayed
-
-Response payload includes RAG evidence references so UI can show:
-- source names;
-- cited snippets;
-- traceability metadata alongside final answer.
-
-## 12) RAG Limitations
-
-- retrieval quality depends on corpus quality and chunking strategy;
-- citation granularity may be coarse for long documents;
-- permissions are not yet document-level RBAC hardened;
-- large-scale ingestion orchestration is still maturing.
-
-## 13) Future Improvements
-
-- hybrid keyword plus vector search
-- reranking
-- document permissions
-- citations with page numbers
-- ingestion pipeline
-- evaluation with RAGAS
-- freshness monitoring
-
-## RAG Pipeline Diagram
+## RAG Pipeline
 
 ```mermaid
 flowchart LR
-    UP[Document upload] --> VAL[Validation]
-    VAL --> CH[Chunking]
-    CH --> EMB[Embeddings]
-    EMB --> IDX[Qdrant indexed chunks]
-    Q[User question] --> RET[Retriever]
-    IDX --> RET
-    RET --> CTX[Context package]
-    CTX --> AG[Agent synthesis]
-    AG --> CIT[Answer with citations]
+    D[Seeded + uploaded docs] --> V[Validation]
+    V --> C[Chunking + metadata]
+    C --> E[Embeddings]
+    E --> Q[(Qdrant)]
+    Q --> R[Retriever]
+    U[User policy/risk question] --> R
+    R --> S[Synthesis]
+    S --> A[Executive answer + rag_sources + trace]
 ```

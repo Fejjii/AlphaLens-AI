@@ -1,87 +1,105 @@
-# Demo Script (5 Minutes)
+# Demo Script (5-7 Minutes)
 
-## 1) Product Opening (30s)
+## 1) Login and Dashboard (30-45s)
 
-“AlphaLens AI is an agentic investment intelligence platform for portfolio decision support. It combines structured AI orchestration, hybrid RAG, provider fallbacks, and human approvals in one full-stack workflow.”
+Open login and land on dashboard.
 
-## 2) Dashboard (30s)
+Presenter notes:
+- Position AlphaLens as an agentic decision support platform, not a trading bot.
+- Point out portfolio snapshot and governance-aware workflow.
 
-Open dashboard and show:
-- portfolio snapshot and risk metrics;
-- key holdings and status signals;
-- approvals/usage summary cards.
+## 2) Portfolio Overview (30-45s)
 
-## 3) Runtime Status and Fallback Explanation (30s)
+Show holdings, concentration view, and risk framing.
 
-Open settings/runtime area and explain:
-- runtime health and provider status;
-- fallback mode availability for reliable demos;
-- deterministic behavior when external keys are not configured.
+Presenter notes:
+- Explain this is the baseline context used by the agent for portfolio questions.
 
-## 4) Knowledge Base and RAG (40s)
+## 3) Agent Chat: App Help (20-30s)
 
-Open knowledge base page and show:
-- seeded internal documents;
-- upload capability;
-- how indexed docs are later cited by the agent.
-
-Prompt:
-```text
-Summarize the internal investment policy from the knowledge base.
-```
-
-## 5) Agent Chat (90s)
-
-Run prompts in chat:
+Ask:
 
 ```text
-What has been the performance of the portfolio in the last 1 month?
+How many languages do you support?
 ```
 
-```text
-Which policy rules are currently breached by the portfolio?
-```
+Presenter notes:
+- Show app-help route behavior.
+- Confirm no investment actions (for example, no memo CTA in app-help mode).
+
+## 4) Agent Chat: RAG Investment Question (60-75s)
+
+Ask:
 
 ```text
 Use RAG and internal policy documents to explain whether NVDA should be trimmed.
 ```
 
-Call out response structure:
-- final answer;
-- tools used;
-- RAG sources;
-- provider mode;
-- limitations/compliance metadata.
+Presenter notes:
+- Highlight clean executive answer quality.
+- Call out evidence and source traceability.
 
-## 6) Human Approval Workflow (30s)
+## 5) Show Evidence + Trace (30-45s)
 
-Open approvals page and show:
-- pending/approved/rejected states;
-- reviewer action options;
-- audit-oriented decision tracking.
+Expand response metadata:
 
-## 7) Reports (20s)
+- Evidence
+- RAG sources (collapsed/expandable)
+- Approval gate indicator
+- Technical trace (collapsed)
 
-Open reports page and show generated investment memo/report artifact from chat context.
+Presenter notes:
+- Mention selected/executed/skipped tool trace and limitations.
 
-## 8) Scenarios (20s)
+## 6) Generate Memo (20-30s)
 
-Open scenarios page and run or show a deterministic scenario result and portfolio impact summary.
+Trigger memo generation from the investment response.
 
-## 9) Speech Transcription (20s)
+Presenter notes:
+- Emphasize context-specific memo generation, not generic template output.
 
-Show speech input/transcription support (or disabled state in fallback mode) and explain it feeds into the same agent pipeline.
+## 7) Reports Page (20-30s)
 
-## 10) Usage and Feedback (20s)
+Open Reports and show the generated memo artifact.
 
-Open usage page and feedback controls:
-- event and cost visibility;
-- feedback loop for response quality monitoring.
+Presenter notes:
+- Confirm report persisted with context from the originating decision.
 
-## 11) Architecture Close (10s)
+## 8) Investigations Timeline (20-30s)
 
-End on architecture/docs summary:
-- FastAPI backend + Next.js frontend;
-- LangGraph orchestration + tool layer + fallback providers;
-- Postgres, Redis, Qdrant data stack;
-- CI-validated, Docker-ready project structure.
+Open Investigations and show persisted timeline entry linked to the decision run.
+
+Presenter notes:
+- Position this as auditability and post-hoc review support.
+
+## 9) Scenario Prompt in Chat (30-45s)
+
+Ask:
+
+```text
+What happens if NVDA drops 10 percent?
+```
+
+Presenter notes:
+- Explain scenario-style chat uses first-order portfolio impact fallback when needed.
+
+## 10) Scenarios Page (20-30s)
+
+Open Scenarios page and explain manual simulation workflow.
+
+## 11) Approvals (20-30s)
+
+Open Approvals page and show approve/reject/needs-more-analysis states.
+
+## 12) Usage and Feedback (20-30s)
+
+Open Usage/Feedback views and show operational observability.
+
+## 13) Close with Architecture Story (20-30s)
+
+Close with:
+
+- Next.js frontend + FastAPI backend
+- LangGraph orchestration with router-driven tool selection
+- Postgres + Redis + Qdrant data layer
+- Human-in-the-loop governance and persisted investigation/report trails

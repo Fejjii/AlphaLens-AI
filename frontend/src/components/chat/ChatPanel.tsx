@@ -478,55 +478,79 @@ export function ChatPanel() {
       id: `u_${clientMessageId}`,
       message: { role: "user", content },
     };
+    const turnsBeforeSend = turns.length;
     setTurns((prev) => [...prev, userTurn]);
-    setInput("");
     setPending(true);
     setChatError(null);
 
     try {
-      const response = await api.chat({
-        conversation_id: conversationId ?? undefined,
-        messages: [userTurn.message],
-      });
+      const { result: response, httpStatus, clientRequestId } = await api.chat(
+        {
+          conversation_id: conversationId ?? undefined,
+          messages: [userTurn.message],
+        },
+        { clientRequestId: clientMessageId },
+      );
       const finalAnswer = response.analysis?.final_answer?.trim();
-      const renderedContent = finalAnswer || response.message?.content?.trim() || "";
-      if (!renderedContent) {
-        setTurns((prev) => prev.filter((t) => t.id !== userTurn.id));
-        setInput(content);
-        setChatError(
-          process.env.NODE_ENV === "development"
-            ? "Malformed agent response: final_answer missing"
-            : "Agent response is incomplete.",
-        );
-        return;
+      const fallbackMessage = "Response received, but the answer body was empty.";
+      const renderedContent = finalAnswer || response.message?.content?.trim() || fallbackMessage;
+      const hasFinalAnswer = Boolean(finalAnswer);
+      const hasDecision = Boolean(response.decision);
+      const answerType: ChatAnswerType = response.answer_type ?? "investment_decision";
+      const assistantTurn: ChatTurn = {
+        id: `a_${response.response_id ?? Date.now()}`,
+        message: {
+          role: response.message?.role ?? "assistant",
+          content: renderedContent,
+        },
+        citations: response.citations,
+        decision: response.decision ?? null,
+        responseId: response.response_id,
+        usedTools: response.used_tools,
+        analysis: response.analysis,
+        answerType,
+        routing: response.routing,
+        investigationId: response.investigation_id ?? null,
+      };
+      if (process.env.NODE_ENV === "development") {
+        // eslint-disable-next-line no-console
+        console.debug("[chat] send result", {
+          clientRequestId,
+          sentText: content,
+          responseStatus: httpStatus,
+          response_answer_type: response.answer_type,
+          response_response_id: response.response_id,
+          response_final_answer_exists: hasFinalAnswer,
+          response_decision_exists: hasDecision,
+          assistantTurnCreated: Boolean(assistantTurn.message.content?.trim()),
+          messages_length_before: turnsBeforeSend,
+          messages_length_after: turnsBeforeSend + 2,
+          render_path_used:
+            answerType === "investment_decision"
+              ? "investment_card"
+              : "simple_assistant",
+        });
       }
       setConversationId(response.conversation_id);
       syncConversationInUrl(response.conversation_id);
-      const answerType: ChatAnswerType = response.answer_type ?? "investment_decision";
-      setTurns((prev) => [
-        ...prev,
-        {
-          id: `a_${response.response_id ?? Date.now()}`,
-          message: {
-            ...response.message,
-            content: renderedContent,
-          },
-          citations: response.citations,
-          decision: response.decision ?? null,
-          responseId: response.response_id,
-          usedTools: response.used_tools,
-          analysis: response.analysis,
-          answerType,
-          routing: response.routing,
-          investigationId: response.investigation_id ?? null,
-        },
-      ]);
+      setTurns((prev) => [...prev, assistantTurn]);
+      setInput("");
       void refreshConversations();
     } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        // eslint-disable-next-line no-console
+        console.debug("[chat] send error", {
+          clientRequestId: clientMessageId,
+          sentText: content,
+          errorName: error instanceof Error ? error.name : "unknown",
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      }
       setTurns((prev) => prev.filter((t) => t.id !== userTurn.id));
-      setInput(content);
       if (error instanceof ApiError && error.message.trim()) {
         setChatError(error.message);
+      } else if (error instanceof Error && error.name === "TimeoutError") {
+        setChatError("Chat request timed out. Please retry.");
       } else {
         setChatError("Chat request failed. Check backend and retry.");
       }

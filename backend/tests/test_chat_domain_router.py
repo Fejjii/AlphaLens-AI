@@ -88,7 +88,7 @@ def test_rag_inference_suggested_tools() -> None:
         llm_classify=None,
     )
     assert r.answer_type == ChatAnswerType.INVESTMENT_DECISION.value
-    assert "rag_retrieve" in r.suggested_tools
+    assert "rag_retriever" in r.suggested_tools
 
 
 def test_web_news_inference() -> None:
@@ -100,7 +100,7 @@ def test_web_news_inference() -> None:
         llm_classify=None,
     )
     assert r.answer_type == ChatAnswerType.INVESTMENT_DECISION.value
-    assert "web_search" in r.suggested_tools
+    assert "web_news" in r.suggested_tools
 
 
 def test_sec_inference() -> None:
@@ -124,7 +124,7 @@ def test_macro_inference() -> None:
         llm_classify=None,
     )
     assert r.answer_type == ChatAnswerType.INVESTMENT_DECISION.value
-    assert "macro_snapshot" in r.suggested_tools
+    assert "macro_data" in r.suggested_tools
 
 
 def test_clarification_without_investment_context() -> None:

@@ -1,80 +1,58 @@
 # Security and Compliance
 
-This document summarizes current security controls and compliance-oriented guardrails in AlphaLens AI.
-
 ## 1) Authentication
 
-AlphaLens uses authenticated user flows for protected product surfaces and API routes.
+- JWT access tokens protect authenticated API routes
+- Refresh tokens support session continuity
+- Logout/revocation flows invalidate refresh token sessions
+- Expired access tokens return `401` with structured error payloads
 
-## 2) JWT Access Tokens
+## 2) Authorization
 
-Access tokens are used for authenticated API requests and route protection.
+Repositories and API handlers are user-scoped so one user cannot access another user's:
 
-## 3) Refresh Token Revocation
+- Conversations
+- Reports
+- Investigations
+- Approvals
 
-Refresh token records support session continuity and revocation workflows.
+## 3) Rate Limiting
 
-## 4) Protected Routes
+Rate limiting supports:
 
-Sensitive APIs and frontend pages are protected by auth checks and user-scoped access.
+- In-memory backend (dev/test)
+- Redis backend (shared/distributed runtime)
 
-## 5) Plan Quotas
+Limits are applied to key routes including auth, chat, speech, reports, scenarios, and feedback.
 
-Plan-aware quotas constrain usage and protect shared resources while exposing transparent usage status in UI.
+## 4) Upload Validation
 
-## 6) Rate Limiting
+Input validation exists for:
 
-Rate limiting is applied to relevant API paths with Redis-backed options for distributed enforcement.
+- Speech uploads (type/size checks, provider-mode handling)
+- Knowledge document uploads (`.md`/`.txt` ingestion flow)
 
-## 7) Upload Validation
+## 5) Financial Compliance Guardrails
 
-Knowledge uploads are validated before ingestion to reduce malformed content and unsafe file handling risks.
+- Platform includes explicit non-advisory framing
+- No broker/trading execution
+- Sensitive recommendation paths can require approval
+- Weak evidence or tool limitations are surfaced in response metadata
+- Human-in-the-loop remains central for higher-risk decisions
 
-## 8) CORS and Security Headers
+## 6) Secret Handling
 
-CORS is explicitly configured for known frontend origins; security headers and middleware controls are included at API boundary level.
+- `.env` is ignored and should remain untracked
+- Secrets are environment-managed
+- Runtime/provider status endpoints expose modes/reasons, not secret values
+- Logging should avoid raw secret leakage
 
-## 9) Secret Handling
+## 7) Production Gaps
 
-Secrets are environment-managed and should never be committed. `.env` remains ignored and untracked.
-
-## 10) No Real Broker Execution
-
-AlphaLens does not place trades or connect to broker execution in current scope.
-
-## 11) HITL Approval Requirements
-
-High-risk recommendations or weak-evidence outcomes can require human approval before operational acceptance.
-
-## 12) Sensitive Actions Requiring Elevated Governance
-
-- buy
-- sell
-- trim
-- rebalance
-- escalation
-- high risk
-- weak evidence
-
-## 13) Disclaimers and Limitations
-
-- This platform is not financial advice.
-- Demo data can be synthetic unless real providers are configured.
-- Recommendations are decision support artifacts, not autonomous execution instructions.
-
-## 14) Compliance Metadata in Responses
-
-Agent responses include structured compliance fields (e.g., policy flags, approval required indicators, and limitation notes) to support auditability.
-
-## 15) What Remains for Real Production
-
-- audit immutability
-- policy versioning
-- legal review
-- role based access control
-- 2FA
-- password reset
-- email verification
-- stricter CSP
-- Sentry
-- container scanning
+- Alembic-driven migration workflow
+- Sentry/error monitoring integration
+- Stronger audit logging and immutable trails
+- Admin operations dashboard
+- 2FA, email verification, password reset hardening
+- Stricter CSP/CORS posture per environment
+- Container/image scanning in release workflows

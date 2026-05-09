@@ -8,23 +8,31 @@ from typing import Any, Callable
 from alphalens.schemas.agent import ChatAnswerType, ChatRouting
 from alphalens.schemas.llm import RouteClassification
 
-# --- Tool ids aligned with registered LangGraph tools ---
+# --- Canonical router tool hints (mapped to executable registry names later) ---
 _CANONICAL_TOOLS: dict[str, str] = {
-    "rag_retriever": "rag_retrieve",
-    "rag_retrieve": "rag_retrieve",
-    "web_news": "web_search",
-    "web_search": "web_search",
-    "market_data": "market_quote",
-    "market_quote": "market_quote",
-    "macro": "macro_snapshot",
-    "macro_snapshot": "macro_snapshot",
+    "rag_retriever": "rag_retriever",
+    "rag_retrieve": "rag_retriever",
+    "rag": "rag_retriever",
+    "web_news": "web_news",
+    "web_search": "web_news",
+    "news": "web_news",
+    "market_data": "market_data",
+    "market_quote": "market_data",
+    "market": "market_data",
+    "macro_data": "macro_data",
+    "macro": "macro_data",
+    "macro_snapshot": "macro_data",
     "sec": "sec_filings",
     "sec_filings": "sec_filings",
-    "portfolio_analyzer": "portfolio_analyze",
-    "portfolio_analyze": "portfolio_analyze",
-    "policy_rules": "risk_check",
-    "policy_risk": "risk_check",
-    "risk_check": "risk_check",
+    "portfolio_analyzer": "portfolio_analyzer",
+    "portfolio_analyze": "portfolio_analyzer",
+    "portfolio": "portfolio_analyzer",
+    "policy_rules": "risk_checker",
+    "policy_risk": "risk_checker",
+    "risk_check": "risk_checker",
+    "risk_checker": "risk_checker",
+    "scenario": "scenario_simulation",
+    "scenario_simulation": "scenario_simulation",
 }
 
 _ALLOWED_TOOL_IDS = frozenset(_CANONICAL_TOOLS.values())
@@ -273,7 +281,7 @@ def _infer_suggested_tools(lowered: str) -> list[str]:
             "internal document",
         )
     ):
-        tools.append("rag_retrieve")
+        tools.append("rag_retriever")
     if any(
         t in lowered
         for t in (
@@ -288,17 +296,17 @@ def _infer_suggested_tools(lowered: str) -> list[str]:
             "what happened",
         )
     ):
-        tools.append("web_search")
+        tools.append("web_news")
     if any(t in lowered for t in ("price", "quote", "return", "performance", "valuation", "pe ratio", "market cap")):
-        tools.append("market_quote")
+        tools.append("market_data")
     if any(t in lowered for t in ("fed", "rates", "inflation", "macro", "yield", "recession", "cpi")):
-        tools.append("macro_snapshot")
+        tools.append("macro_data")
     if any(t in lowered for t in ("10-k", "10k", "10-q", "10q", "sec", "filing", "edgar", "annual report")):
         tools.append("sec_filings")
     if any(t in lowered for t in ("portfolio", "holding", "weight", "nav", "pnl", "exposure", "concentration")):
-        tools.append("portfolio_analyze")
+        tools.append("portfolio_analyzer")
     if any(t in lowered for t in ("mandate", "breach", "policy", "limit", "compliance", "rule")):
-        tools.append("risk_check")
+        tools.append("risk_checker")
     return normalize_suggested_tools(tools)
 
 
@@ -444,7 +452,7 @@ def _layer_a_deterministic(
         intent_guess = "portfolio_performance"
         if _is_scenario_shock_prompt(lowered):
             intent_guess = "scenario_simulation"
-            tools = normalize_suggested_tools(["portfolio_analyze"])
+            tools = normalize_suggested_tools(["scenario_simulation", "portfolio_analyzer"])
         elif "rag" in lowered or "knowledge base" in lowered or "internal document" in lowered:
             intent_guess = "rag_question"
         elif "policy" in lowered or "mandate" in lowered or "breach" in lowered:

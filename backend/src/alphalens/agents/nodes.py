@@ -101,6 +101,43 @@ _SEC_KEYWORDS = frozenset(
     }
 )
 
+_ROUTER_TOOL_ALIASES: dict[str, str] = {
+    "portfolio": "portfolio_analyzer",
+    "portfolio_analyzer": "portfolio_analyzer",
+    "portfolio_analyze": "portfolio_analyzer",
+    "policy_rules": "risk_checker",
+    "policy": "risk_checker",
+    "risk_checker": "risk_checker",
+    "risk_check": "risk_checker",
+    "rag": "rag_retriever",
+    "rag_retriever": "rag_retriever",
+    "rag_retrieve": "rag_retriever",
+    "web_search": "web_news",
+    "web_news": "web_news",
+    "news": "web_news",
+    "market": "market_data",
+    "market_data": "market_data",
+    "market_quote": "market_data",
+    "macro": "macro_data",
+    "macro_data": "macro_data",
+    "macro_snapshot": "macro_data",
+    "sec": "sec_filings",
+    "sec_filings": "sec_filings",
+    "scenario": "scenario_simulation",
+    "scenario_simulation": "scenario_simulation",
+}
+
+_CANONICAL_TO_EXECUTABLE: dict[str, str] = {
+    "portfolio_analyzer": "portfolio_analyze",
+    "risk_checker": "risk_check",
+    "rag_retriever": "rag_retrieve",
+    "market_data": "market_quote",
+    "web_news": "web_search",
+    "macro_data": "macro_snapshot",
+    "sec_filings": "sec_filings",
+    "scenario_simulation": "scenario_simulation",
+}
+
 
 def _needs_sec(text: str, intent: str, tickers: list[str]) -> bool:
     """Return True when SEC filing context is warranted.
@@ -236,10 +273,17 @@ def make_gather_node(registry: ToolRegistry) -> NodeFn:
         needs_web = state.get("needs_web_search", False)
         needs_macro_data = state.get("needs_macro", False)
         needs_sec_data = state.get("needs_sec", False)
+        router_suggested = list(state.get("router_suggested_tools", []) or [])
+        user_text = _last_user_message(state)
 
         evidence: list[dict] = []
         used: list[str] = []
         citations: list[dict] = []
+        limitations: list[str] = []
+        tools_skipped: list[str] = []
+        skip_reasons: list[str] = []
+        selected_before: list[str] = []
+        selected_after: list[str] = []
 
         tool_meta = {
             "conversation_id": state.get("conversation_id"),
@@ -249,6 +293,10 @@ def make_gather_node(registry: ToolRegistry) -> NodeFn:
 
         def _run(name: str, **kwargs: Any) -> None:
             if not registry.has(name):
+                tools_skipped.append(name)
+                reason = f"Suggested tool {name} is not available in the current registry."
+                skip_reasons.append(reason)
+                limitations.append(reason)
                 return
             trace_tool_call(name, inputs=kwargs, metadata=tool_meta)
             try:
@@ -268,6 +316,30 @@ def make_gather_node(registry: ToolRegistry) -> NodeFn:
             if name == "rag_retrieve":
                 citations.extend(_citations_from(result))
 
+        def _append_unique(seq: list[str], item: str) -> None:
+            if item not in seq:
+                seq.append(item)
+
+        def _normalize_router_tools(raw_tools: list[str]) -> tuple[list[str], list[dict[str, str]]]:
+            normalized: list[str] = []
+            skipped: list[dict[str, str]] = []
+            for raw in raw_tools:
+                key = str(raw or "").strip().lower().replace(" ", "_")
+                if not key:
+                    continue
+                canonical = _ROUTER_TOOL_ALIASES.get(key)
+                if canonical is None:
+                    skipped.append(
+                        {
+                            "tool": key,
+                            "reason": "Router suggested unknown tool alias.",
+                        }
+                    )
+                    continue
+                if canonical not in normalized:
+                    normalized.append(canonical)
+            return normalized, skipped
+
         node_inputs = {
             "intent": state.get("intent"),
             "tickers": tickers,
@@ -278,12 +350,97 @@ def make_gather_node(registry: ToolRegistry) -> NodeFn:
             "needs_web_search": needs_web,
             "needs_macro": needs_macro_data,
             "needs_sec": needs_sec_data,
+            "router_suggested_tools": router_suggested,
         }
         with trace_node(
             "gather",
             inputs=node_inputs,
             metadata={"conversation_id": state.get("conversation_id")},
         ):
+            router_canonical, router_skipped = _normalize_router_tools(router_suggested)
+            for item in router_skipped:
+                name = item["tool"]
+                reason = f"{item['reason']} ({name})"
+                tools_skipped.append(name)
+                skip_reasons.append(reason)
+                limitations.append(f"Suggested tool {name} is not available in the current registry.")
+            for canonical in router_canonical:
+                _append_unique(selected_before, canonical)
+
+            # Existing deterministic intent-hint selection remains in place.
+            if needs_portfolio:
+                _append_unique(selected_before, "portfolio_analyzer")
+            if needs_risk_check:
+                _append_unique(selected_before, "risk_checker")
+            if needs_market_data:
+                _append_unique(selected_before, "market_data")
+            if needs_macro_data:
+                _append_unique(selected_before, "macro_data")
+            if needs_sec_data:
+                _append_unique(selected_before, "sec_filings")
+            if needs_rag:
+                _append_unique(selected_before, "rag_retriever")
+            if needs_web:
+                _append_unique(selected_before, "web_news")
+
+            lowered = user_text.lower()
+            intent = str(state.get("intent", ""))
+            if (
+                intent in {"portfolio_review", "portfolio_performance", "risk_check", "policy_breach_check", "scenario_simulation"}
+                or any(k in lowered for k in ("portfolio", "risk", "policy", "scenario", "exposure"))
+            ):
+                _append_unique(selected_before, "portfolio_analyzer")
+            if any(
+                k in lowered
+                for k in (
+                    "internal policy",
+                    "knowledge base",
+                    "uploaded",
+                    "committee notes",
+                    "risk playbook",
+                    "research notes",
+                    "rag",
+                )
+            ):
+                _append_unique(selected_before, "rag_retriever")
+            if any(k in lowered for k in ("latest", "recent", "today", "moving", "news", "market event")):
+                _append_unique(selected_before, "web_news")
+            if any(k in lowered for k in ("price", "performance", "return", "p&l", "movement", "quote")):
+                _append_unique(selected_before, "market_data")
+            if any(k in lowered for k in ("rates", "fed", "inflation", "recession", "yields", "macro")):
+                _append_unique(selected_before, "macro_data")
+            if any(k in lowered for k in ("filings", "10-k", "10-q", "sec", "annual report", "risk factors")):
+                _append_unique(selected_before, "sec_filings")
+            scenario_requested = any(
+                k in lowered for k in ("what-if", "what if", "shock", "drop", "rise", "downside", "upside", "stress", "scenario")
+            ) or intent == "scenario_simulation"
+            if scenario_requested:
+                _append_unique(selected_before, "scenario_simulation")
+
+            for canonical in selected_before:
+                executable = _CANONICAL_TO_EXECUTABLE.get(canonical)
+                if executable is None:
+                    tools_skipped.append(canonical)
+                    skip_reasons.append(f"No executable tool mapping for canonical tool '{canonical}'.")
+                    limitations.append(f"Suggested tool {canonical} is not available in the current registry.")
+                    continue
+                if canonical == "scenario_simulation" and not registry.has(executable):
+                    tools_skipped.append(canonical)
+                    skip_reasons.append("Scenario tool unavailable; falling back to portfolio_analyzer deterministic estimate.")
+                    limitations.append(
+                        "Scenario estimate is first order and uses current portfolio exposure; full persisted scenario simulation is available on the Scenarios page."
+                    )
+                    if "portfolio_analyze" not in selected_after:
+                        selected_after.append("portfolio_analyze")
+                    continue
+                if not registry.has(executable):
+                    tools_skipped.append(canonical)
+                    skip_reasons.append(f"Executable tool '{executable}' unavailable in registry.")
+                    limitations.append(f"Suggested tool {canonical} is not available in the current registry.")
+                    continue
+                if executable not in selected_after:
+                    selected_after.append(executable)
+
             if state.get("intent") in {"policy_breach_check", "rag_policy_question", "investment_recommendation", "risk_check"}:
                 evidence.append(
                     {
@@ -300,28 +457,33 @@ def make_gather_node(registry: ToolRegistry) -> NodeFn:
                     }
                 )
                 used.append("policy_rules")
-            if needs_portfolio:
-                _run("portfolio_analyze")
-            if needs_risk_check:
-                _run("risk_check")
-            if needs_market_data:
-                _run("market_quote", tickers=tickers or _default_tickers())
-            if needs_macro_data:
-                _run("macro_snapshot")
-            if needs_sec_data:
-                for ticker in (tickers or _default_tickers()):
-                    _run("sec_filings", ticker=ticker)
-            if needs_rag:
-                _run("rag_retrieve", query=_last_user_message(state))
-            if needs_web:
-                # Web search complements RAG with fresh external context;
-                # never replaces it.
-                _run("web_search", query=_last_user_message(state))
+            for tool_name in selected_after:
+                if tool_name == "market_quote":
+                    _run("market_quote", tickers=tickers or _default_tickers())
+                    continue
+                if tool_name == "sec_filings":
+                    for ticker in (tickers or _default_tickers()):
+                        _run("sec_filings", ticker=ticker)
+                    continue
+                if tool_name == "rag_retrieve":
+                    _run("rag_retrieve", query=user_text)
+                    continue
+                if tool_name == "web_search":
+                    _run("web_search", query=user_text)
+                    continue
+                _run(tool_name)
 
         return {
             "evidence": evidence,
             "used_tools": used,
             "citations": citations,
+            "tool_limitations": limitations,
+            "graph_input_suggested_tools": router_suggested,
+            "gather_selected_tools_before": selected_before,
+            "gather_selected_tools_after": selected_after,
+            "tools_executed": used,
+            "tools_skipped": tools_skipped,
+            "skip_reasons": skip_reasons,
         }
 
     return gather

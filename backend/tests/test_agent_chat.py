@@ -6,6 +6,7 @@ import pytest
 from httpx import AsyncClient
 
 from alphalens.api import deps
+from alphalens.schemas.agent import ChatRouting
 from alphalens.schemas.user import UserProfile
 
 
@@ -380,6 +381,8 @@ async def test_nvda_scenario_shock_returns_200(
     assert "nvda" in text
     assert "10" in body["message"]["content"]
     assert "portfolio" in text or "weight" in text or "impact" in text
+    assert "portfolio_analyze" in body["used_tools"]
+    assert "scenario_simulation" in body["analysis"]["orchestration_trace"]["tools_skipped"]
 
 
 async def test_msft_scenario_shock_returns_200(
@@ -422,6 +425,86 @@ async def test_semiconductor_sector_shock_returns_200(
     body = response.json()
     assert body["answer_type"] == "investment_decision"
     assert "20" in body["message"]["content"] or "scenario" in body["message"]["content"].lower()
+
+
+async def test_news_prompt_executes_news_or_market_tools(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await client.post(
+        "/agent/chat",
+        json={"messages": [{"role": "user", "content": "Why is NVDA moving today?"}]},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    used = set(body["analysis"]["tools_used"])
+    assert "web_search" in used or "market_quote" in used
+    assert body["answer_type"] == "investment_decision"
+
+
+async def test_sec_prompt_executes_sec_or_records_limitation(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await client.post(
+        "/agent/chat",
+        json={"messages": [{"role": "user", "content": "What does the latest 10-K say about NVDA risks?"}]},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    used = set(body["analysis"]["tools_used"])
+    assert "sec_filings" in used or any(
+        "sec_filings" in line.lower() for line in body["analysis"]["limitations"]
+    )
+
+
+async def test_macro_prompt_executes_macro_or_portfolio_tools(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await client.post(
+        "/agent/chat",
+        json={"messages": [{"role": "user", "content": "How would higher rates affect the portfolio?"}]},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    used = set(body["analysis"]["tools_used"])
+    assert "macro_snapshot" in used or "portfolio_analyze" in used
+
+
+async def test_unknown_router_suggested_tool_is_skipped_without_crash(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import alphalens.services.chat_service as chat_service_module
+
+    original = chat_service_module.resolve_chat_route
+
+    def _fake_route(*args: object, **kwargs: object) -> ChatRouting:
+        route = original(*args, **kwargs)
+        return route.model_copy(
+            update={
+                "answer_type": "investment_decision",
+                "intent": "portfolio_performance",
+                "suggested_tools": ["totally_fake_tool"],
+            }
+        )
+
+    monkeypatch.setattr(chat_service_module, "resolve_chat_route", _fake_route)
+    response = await client.post(
+        "/agent/chat",
+        json={"messages": [{"role": "user", "content": "How is my portfolio doing?"}]},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    trace = body["analysis"]["orchestration_trace"]
+    assert "totally_fake_tool" in trace["tools_skipped"]
+    assert any("unknown tool alias" in reason.lower() for reason in trace["skip_reasons"])
 
 
 async def test_agent_chat_expired_token_returns_401_json(

@@ -1,88 +1,90 @@
 # Data Architecture
 
-This document explains what data AlphaLens AI manages, where it is stored, and what is sufficient for a demo versus a production SaaS implementation.
+This document explains what data AlphaLens AI stores, where it lives, and how data flows through retrieval and decision workflows.
 
-## 1) Data Domains in the App
+## 1) Demo Portfolio Data
 
-1. Seeded synthetic portfolio holdings
-2. Transactions
-3. Watchlist
-4. Cash
-5. Internal knowledge base
-   - Investment Policy
-   - Risk Playbook
-   - AI Infrastructure Thesis
-   - Committee Notes
-   - Readme
-6. Uploaded user documents
-7. Feedback
-8. Reports
-9. Scenarios
-10. Approvals
-11. Usage events
-12. Conversation memory
-13. Users and refresh tokens
+Portfolio demo data includes:
 
-## 2) Storage Architecture
+- Holdings
+- Market values
+- Weights
+- P&L signals
+- Watchlist
+- Cash
+- Risk indicators
 
-### Postgres
+These datasets power portfolio analysis, concentration checks, and scenario-oriented responses.
 
-Primary durable relational data:
-- users
-- refresh tokens
-- approvals
-- feedback
-- reports
-- scenarios
-- usage events
-- conversation memory
+## 2) Internal Knowledge Base
 
-### Redis
+Seeded and uploaded knowledge sources include:
 
-Operational runtime support:
-- cache responses and tool results where configured;
-- rate limiting counters and policy;
-- runtime memory fallback support where applicable.
+- Investment policy
+- Risk playbook
+- Committee notes
+- Research notes
+- AI infrastructure thesis
+- Uploaded knowledge documents (`.md`/`.txt`)
 
-### Qdrant
+## 3) RAG Data Flow
 
-Retrieval and vector search:
-- document vectors for internal and uploaded documents;
-- chunk metadata (source, title/path, ingest timestamp, chunk index);
-- retrieval collection (configured by `RAG_COLLECTION`, default collection pattern is `alphalens_knowledge` unless overridden).
+```mermaid
+flowchart LR
+    MD[Markdown/text docs] --> CH[Chunking]
+    CH --> EMB[Embeddings]
+    EMB --> Q[(Qdrant collection)]
+    Q --> RET[Retrieval]
+    RET --> OUT[Citations / rag_sources]
+```
 
-### Local Files
+RAG outputs are surfaced as structured `rag_sources` and supporting evidence in agent responses.
 
-Repository-seeded assets:
-- synthetic portfolio and demo data under `data/`;
-- seeded knowledge base markdown documents under `data/knowledge_base/`.
+## 4) Operational Data in Postgres
 
-## 3) Demo Sufficiency
+Postgres is the durable system of record for operational entities:
 
-For portfolio-style demos and reviewer evaluation, the current dataset is enough to show:
-- agent reasoning over portfolio + policy + retrieval evidence;
-- approval routing and audit status transitions;
-- report and scenario generation workflows;
-- usage, feedback, and fallback provider observability.
+- Users
+- Refresh tokens
+- Approvals
+- Feedback
+- Reports
+- Scenarios
+- Usage events
+- Conversation memory
+- Investigations
 
-## 4) What To Add for Professional SaaS
+## 5) Redis
 
-Recommended production data expansion:
-- real portfolio import;
-- broker integrations;
-- market data history;
-- benchmark data;
-- risk factor data;
-- company fundamentals;
-- earnings transcripts;
-- filing parser;
-- audit snapshots;
-- data freshness tracking;
-- data quality checks.
+Redis supports runtime operations:
 
-## 5) Design Principles
+- Caching
+- Rate limiting
+- Optional conversation memory backend
 
-- Keep data ownership explicit per bounded context (auth, approvals, reports, usage, RAG).
-- Store decision-critical metadata in structured form, not only text blobs.
-- Separate operational caches (Redis) from system-of-record persistence (Postgres).
-- Treat retrieval corpora and vector indexes as first-class, versioned assets.
+When Redis is unavailable, in-memory fallback paths are used in dev/test/demo workflows.
+
+## 6) External Provider Data
+
+External integrations provide contextual data:
+
+- OpenAI (LLM and speech)
+- Serper (web/news)
+- FRED (macro)
+- Alpha Vantage (market data)
+- SEC EDGAR (filings context)
+
+If providers are disabled or keys are missing, fallback behavior keeps the app functional and demo-ready.
+
+## 7) Data Limitations and Production Improvements
+
+Current limitations and upgrades:
+
+- Real portfolio import not yet integrated
+- Broker/CSV import workflows pending
+- Market data SLA and freshness controls need formalization
+- Filing parsing can be strengthened
+- Data freshness timestamps can be surfaced more consistently
+- Full portfolio transaction history can be expanded
+- Benchmark data quality/depth can be improved
+- Production schema evolution should use Alembic migrations

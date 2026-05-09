@@ -1,102 +1,37 @@
 # Repository Map
 
-This map explains where core functionality lives and which commands are most important for validation and delivery.
+## Major Directories
 
-## Core Directories
+- `backend/src/alphalens/api`: FastAPI routers, dependency wiring, middleware, and entrypoint composition
+- `backend/src/alphalens/services`: Domain services (chat, reports, investigations, approvals, scenarios, auth, usage)
+- `backend/src/alphalens/agents`: LangGraph graph, nodes, and state contracts
+- `backend/src/alphalens/tools`: Agent tool implementations and registry-facing contracts
+- `backend/src/alphalens/repositories`: Persistence interfaces/implementations for user-scoped entities
+- `backend/src/alphalens/integrations`: External providers and fallback adapters
+- `backend/src/alphalens/memory`: Conversation memory backends (in-memory, Redis, SQLAlchemy-backed options)
+- `backend/src/alphalens/schemas`: Pydantic request/response/domain schemas
+- `backend/tests`: Backend test suite (routing, tools, RAG, auth, approvals, reports, investigations, speech)
+- `frontend/src/app`: Next.js App Router pages and route segments
+- `frontend/src/components`: Shared UI components (chat, layout, cards, controls)
+- `frontend/src/lib`: API clients, formatting helpers, memo payload utilities, runtime helpers
+- `frontend/src/types`: Shared frontend TypeScript domain and API types
+- `docs`: Architecture, workflow, deployment, security, evaluation, and demo documentation
+- `data/knowledge_base`: Seeded internal knowledge base markdown corpus
+- `.github/workflows`: CI pipelines for backend, frontend, Docker, and security checks
 
-### `backend/src/alphalens/api`
+## Key Infrastructure Files
 
-FastAPI routers, dependencies, API wiring, and service entrypoints.
+- `docker-compose.yml`: Local multi-service stack
+- `render.yaml`: Managed deployment reference
 
-### `backend/src/alphalens/services`
-
-Business orchestration layer for chat, approvals, reports, scenarios, usage, and policy-aware workflows.
-
-### `backend/src/alphalens/agents`
-
-LangGraph orchestration nodes and agent state management.
-
-### `backend/src/alphalens/tools`
-
-Tool layer used by the agent (portfolio, risk, policy, market, macro, SEC, RAG helpers).
-
-### `backend/src/alphalens/integrations`
-
-External provider clients and fallback adapters (OpenAI, Serper, FRED, Alpha Vantage, SEC, speech).
-
-### `backend/src/alphalens/repositories`
-
-Persistence abstractions for users, tokens, approvals, feedback, reports, scenarios, usage, and memory.
-
-### `backend/src/alphalens/schemas`
-
-Pydantic contracts for request/response payloads and typed domain schemas.
-
-### `backend/tests`
-
-Backend test suite for APIs, orchestration, RAG, auth, quotas, and persistence behavior.
-
-### `frontend/src/app`
-
-Next.js App Router pages (dashboard, chat, approvals, reports, scenarios, usage, settings, auth).
-
-### `frontend/src/components`
-
-Reusable UI components for chat, layout, cards, badges, and shared visuals.
-
-### `frontend/src/lib`
-
-Frontend API clients, helpers, event utilities, and fallback handling.
-
-### `frontend/src/types`
-
-TypeScript API/domain type definitions aligned with backend contracts.
-
-### `data`
-
-Synthetic demo data and knowledge base source files.
-
-### `docs`
-
-Architecture, setup, deployment, evaluation, demo script, and roadmap documentation.
-
-### `.github/workflows`
-
-CI workflows for backend, frontend, Docker, and security checks.
-
-### Infrastructure files
-
-- `docker-compose.yml`: local multi-service runtime (frontend, backend, Postgres, Redis, Qdrant)
-- `render.yaml`: deployment blueprint reference for Render
-
-## Important Commands
-
-### Backend
-
-```bash
-cd backend
-uv sync
-uv run pytest
-```
-
-### Frontend
-
-```bash
-cd frontend
-pnpm lint
-pnpm build
-```
-
-### Repo checks
-
-```bash
-git status
-git check-ignore .env
-git ls-files .env
-```
-
-### Local full stack
+## Useful Commands
 
 ```bash
 docker compose up --build
+cd backend && uv run pytest
+cd frontend && pnpm lint && pnpm build
+git status
+git diff --stat
+git check-ignore .env
+git ls-files .env
 ```

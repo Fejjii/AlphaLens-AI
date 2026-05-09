@@ -1,124 +1,82 @@
 # Agent Workflow
 
-## 1) Why This Is an Agent (Not a Basic Chatbot)
+## 1) Normal LLM vs AlphaLens Agent
 
-AlphaLens AI is agentic because it performs multi-step orchestration with tool use, retrieval, policy checks, and explicit decision gating. A standard chatbot usually returns free-form text from a single prompt. AlphaLens instead:
-- interprets task intent;
-- selects and executes tools;
-- gathers structured evidence from portfolio, policy, and external sources;
-- applies risk/compliance checks;
-- decides whether human approval is required;
-- returns typed response metadata for UI governance.
+Normal chatbot behavior:
 
-## 2) LangGraph Workflow
+- Answers mainly from prompt context and model prior
+- Usually returns text without explicit operational workflow state
 
-Core stages:
-- `interpret`: classify user request, determine objective, and detect sensitive intent;
-- `gather`: call tool layer and RAG retriever for evidence collection;
-- `synthesize`: combine evidence into coherent analysis with caveats;
-- `decide`: generate recommendation, confidence, rationale, and compliance metadata.
+AlphaLens agent behavior:
 
-## 3) Intent Detection
+- Routes the request (`app_help`, `out_of_scope`, `clarification`, `investment_decision`)
+- Calls tools and retrieval paths when needed
+- Applies policy/risk framing and limitations
+- Persists investigations, approvals, and reports context
+- Returns structured metadata for UI traceability
 
-Intent detection routes requests into categories such as:
-- portfolio performance analysis;
-- policy or compliance checks;
-- security/ticker investigations;
-- RAG summary and document-based questions;
-- memo/report generation;
-- scenario simulation requests.
+## 2) Domain Routing
 
-Intent classification informs tool selection, evidence depth, and approval checks.
+Supported answer types:
 
-## 4) Tool Selection
+- `app_help`
+- `out_of_scope`
+- `clarification`
+- `investment_decision`
 
-The agent selects tools based on detected intent and data requirements:
-- portfolio analyzer;
-- risk checker;
-- policy rules;
-- RAG retriever;
-- market data;
-- web/news search;
-- macro indicators;
-- SEC filing retrieval.
+Non-investment answer types short-circuit and intentionally skip investment-only tooling.
 
-## 5) Portfolio Analyzer
-
-Portfolio analyzer tools compute position-level and aggregate signals, including concentration, exposure, and recent behavior from synthetic or configured data backends.
-
-## 6) Risk Checker
-
-Risk checker evaluates potential risk flags before recommendations are finalized. It contributes to recommendation confidence and approval requirement decisions.
-
-## 7) Policy Rules
-
-Policy tools compare recommendations against internal investment policy constraints. Breach indicators are emitted as structured flags and included in response metadata.
-
-## 8) RAG Retriever
-
-RAG retrieves relevant context from internal and uploaded documents, grounding decisions in organization-specific knowledge instead of only model priors.
-
-## 9) Market Data
-
-Market tools fetch quote/performance context from configured providers (or fallback mode), enabling near-term performance and position framing.
-
-## 10) Web/News
-
-Search/news tools gather external context where available, especially for event-sensitive analysis. Fallback mode preserves deterministic behavior if providers are disabled.
-
-## 11) Macro
-
-Macro tools (e.g., FRED-based indicators) provide broad economic context for sector and risk interpretation.
-
-## 12) SEC Filings
-
-SEC tools add filing-aware context for public companies and support evidence-backed decision narratives.
-
-## 13) Approval Gate
-
-When policy/risk conditions are met (or evidence is weak), the agent marks a recommendation as requiring human review and sends it into the approval workflow.
-
-## 14) Response Structure in the UI
-
-Response payloads are designed for transparent rendering:
-- final answer;
-- tools used;
-- RAG sources;
-- provider mode (real/fallback);
-- data used;
-- limitations;
-- orchestration trace.
-
-## Agent Execution Sequence
+## 3) Tool Routing
 
 ```mermaid
-sequenceDiagram
-    participant User
-    participant Frontend
-    participant API as FastAPI /agent/chat
-    participant Graph as LangGraph
-    participant Tools as Tool Layer
-    participant RAG as RAG Retriever
-    participant Policy as Policy/Risk Checks
-    participant Approvals as Approval Queue
+flowchart TD
+    R[Domain router] --> ST[suggested_tools]
+    ST --> G[LangGraph gather]
+    G --> REG[Tool registry]
+    REG --> EX[Execute available tools]
+    REG --> SK[Skip unavailable tools]
+    EX --> TR[Trace selected/executed tools]
+    SK --> LIM[Limitations and skip reasons]
+```
 
-    User->>Frontend: Ask investment question
-    Frontend->>API: POST /agent/chat
-    API->>Graph: Start workflow
-    Graph->>Graph: interpret
-    Graph->>Tools: gather tool evidence
-    Graph->>RAG: retrieve knowledge chunks
-    Tools-->>Graph: tool results
-    RAG-->>Graph: citations and sources
-    Graph->>Graph: synthesize
-    Graph->>Policy: evaluate policy/risk flags
-    Policy-->>Graph: compliance metadata
-    Graph->>Graph: decide recommendation
-    alt approval required
-        Graph->>Approvals: create/update approval item
-        Approvals-->>Graph: approval state
-    end
-    Graph-->>API: structured response
-    API-->>Frontend: answer + metadata
-    Frontend-->>User: render decision card and evidence
+`gather` merges router suggestions with deterministic logic, normalizes aliases, executes known tools, and records skipped tools/limitations without crashing the run.
+
+## 4) LangGraph Nodes
+
+- `interpret`: classify intent and decision context
+- `gather`: collect tool/RAG evidence and orchestration trace
+- `synthesize`: produce grounded analysis
+- `decide`: produce recommendation metadata and governance signals
+
+## 5) Example Flows
+
+- “How many languages do you support?” -> `app_help` short-circuit
+- “What does internal policy say about concentration?” -> `investment_decision` + RAG/policy tools
+- “Why is NVDA moving today?” -> `investment_decision` + market/news tool path
+- “What does the latest 10-K say about NVDA risks?” -> `investment_decision` + SEC path (or documented limitation)
+- “How would higher rates affect the portfolio?” -> `investment_decision` + macro/portfolio path
+- “What happens if NVDA drops 10 percent?” -> `investment_decision` + scenario-style first-order portfolio impact fallback in chat
+
+## 6) Failure Handling and Resilience
+
+- Provider fallbacks keep the app usable when external APIs are unavailable
+- Unavailable/unknown tools are skipped with explicit limitations and trace entries
+- Expired JWTs return `401` (not `500`)
+- Frontend chat timeout is tuned for long macro/news/SEC answers
+
+## 7) End-to-End Flow
+
+```mermaid
+flowchart TD
+    U[User message] --> RT[Route domain]
+    RT --> T{answer_type}
+    T -->|app_help/out_of_scope/clarification| S[Short-circuit response]
+    T -->|investment_decision| I[interpret]
+    I --> G[gather]
+    G --> SY[synthesize]
+    SY --> D[decide]
+    D --> INV[Persist investigation]
+    D --> AP[Approval gate if required]
+    D --> MEMO[Memo/report generation path]
+    D --> RES[Return structured response]
 ```

@@ -16,6 +16,12 @@ class AgentState(TypedDict, total=False):
     conversation_history: list[dict[str, Any]]
     previous_decisions: list[dict[str, Any]]
     response_language: str
+    router_answer_type: str
+    router_intent: str
+    router_confidence: float
+    router_reason: str
+    router_suggested_tools: list[str]
+    router_language: str
 
     intent: str
     tickers: list[str]
@@ -38,3 +44,10 @@ class AgentState(TypedDict, total=False):
     risk_level: str
     confidence: float
     answer: str
+    tool_limitations: list[str]
+    graph_input_suggested_tools: list[str]
+    gather_selected_tools_before: list[str]
+    gather_selected_tools_after: list[str]
+    tools_executed: list[str]
+    tools_skipped: list[str]
+    skip_reasons: list[str]

@@ -1,63 +1,30 @@
 # Limitations and Roadmap
 
-## 1) Current Demo Limitations
+## Immediate Limitations
 
-- Some workflows rely on synthetic seeded data.
-- Fallback providers are intentionally used in local/demo mode.
-- End-to-end broker execution is intentionally out of scope.
+- Demo/fallback data is still used in many flows
+- Scenario simulation inside chat is first-order fallback style
+- Knowledge base corpus is limited
+- Document upload is currently manual and limited to `.md`/`.txt`
+- Provider fallbacks can reduce external data fidelity
+- No real trading/broker execution
+- No full billing/admin surface yet
+- Dev/test schema guard is used for report drift; production Alembic flow is pending
+- Evaluation beyond tests/manual checks is still limited
 
-## 2) AI Limitations
+## Roadmap
 
-- Model outputs can still be uncertain or incomplete.
-- Tool orchestration quality depends on prompt/routing coverage.
-- Confidence signals are heuristic and require human oversight.
-
-## 3) Data Limitations
-
-- No full historical market/fundamentals warehouse yet.
-- Portfolio import is not yet integrated with real custodians/brokers.
-- Data freshness and quality checks are not fully automated.
-
-## 4) RAG Limitations
-
-- Retrieval quality depends on corpus and chunking.
-- Citation granularity may be coarse.
-- Enterprise-grade document permissions are not fully implemented.
-
-## 5) Provider Limitations
-
-- External APIs can be rate-limited or unavailable.
-- Coverage varies across providers and regions.
-- Some provider integrations are intentionally fallback-first for demos.
-
-## 6) Compliance Limitations
-
-- Approval flow exists, but immutable audit controls are still maturing.
-- Policy governance/versioning needs stronger lifecycle management.
-- Formal legal/compliance sign-off process is not embedded yet.
-
-## 7) Deployment Limitations
-
-- Production hardening is partial (security posture can be tightened).
-- Full observability stack is not yet integrated in all environments.
-- Scaling and high-availability patterns are not exhaustively validated.
-
-## 8) Production Roadmap
-
-- Alembic migrations
-- Stripe billing
-- admin dashboard
-- real broker import
-- real portfolio import
-- document permissions
-- observability with Sentry and LangSmith
-- RAGAS evaluation
-- hybrid search and reranking
-- SEC parsing improvements
-- fundamentals provider
-- benchmark comparison
-- PDF report export
-- RBAC
-- 2FA
-- audit logging
-- deployment hardening
+- Alembic production migration workflow
+- Real portfolio import
+- Broker and CSV import pipeline
+- Register scenario simulator tool in agent registry
+- Link `report_id` back to investigations more directly in UI workflows
+- Admin dashboard
+- Stripe billing integration
+- Sentry + broader monitoring hardening
+- LangSmith trace review workflow
+- RAGAS and golden-set evaluation program
+- Production frontend polish
+- Real market data SLA and stronger reliability controls
+- Stronger SEC parsing/extraction
+- Auth hardening (2FA, verification, reset, session controls)

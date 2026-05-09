@@ -1,98 +1,106 @@
 # Architecture
 
-This document describes AlphaLens AI as a production-style agentic system with explicit orchestration, fallback providers, and human approval controls.
+AlphaLens AI is a full-stack agentic platform where frontend workflows call typed FastAPI endpoints, and investment decisions are orchestrated through LangGraph with tools, retrieval, governance, and durable records.
 
 ## A) System Architecture
 
 ```mermaid
 flowchart LR
-    U[User Browser]
-    FE[Next.js Frontend]
-    BE[FastAPI Backend]
-    ORCH[Agent Orchestration<br/>LangGraph]
-    TOOLS[Tool Layer]
-    PROV[Provider Layer]
+    FE[Frontend<br/>Next.js] --> API[Backend API<br/>FastAPI]
+    API --> SVC[Services Layer]
+    SVC --> AG[LangGraph Agent]
+    AG --> TL[Tool Registry]
+    TL --> PR[Providers]
 
-    PG[(Postgres)]
-    RD[(Redis)]
-    QD[(Qdrant)]
+    API --> PG[(Postgres)]
+    API --> RD[(Redis)]
+    TL --> QD[(Qdrant)]
 
-    OA[OpenAI]
-    SP[Serper]
-    FR[FRED]
-    AV[Alpha Vantage]
-    SEC[SEC EDGAR]
-
-    U --> FE
-    FE -->|/api/backend| BE
-    BE --> ORCH
-    ORCH --> TOOLS
-    TOOLS --> PROV
-
-    BE --> PG
-    BE --> RD
-    TOOLS --> QD
-
-    PROV --> OA
-    PROV --> SP
-    PROV --> FR
-    PROV --> AV
-    PROV --> SEC
+    PR --> OA[OpenAI]
+    PR --> SP[Serper]
+    PR --> FR[FRED]
+    PR --> AV[Alpha Vantage]
+    PR --> SEC[SEC EDGAR]
 ```
 
-## B) Request Flow
+## B) Agent Workflow
 
 ```mermaid
 flowchart TD
-    Q[User question] --> FC[Frontend chat]
-    FC --> API[/POST /agent/chat/]
-    API --> LG[LangGraph workflow]
-    LG --> TL[Tools]
-    LG --> RAG[RAG retrieval]
-    TL --> SYN[Synthesize decision response]
-    RAG --> SYN
-    SYN --> GATE{Approval gate required?}
-    GATE -->|Yes| AQ[Create / update approval item]
-    GATE -->|No| RESP[Return response payload]
-    AQ --> RESP
-    RESP --> RENDER[Frontend rendering]
+    U[User message] --> R[Domain router]
+    R --> AT{answer_type}
+    AT -->|app_help| SC1[Short-circuit app help response]
+    AT -->|out_of_scope| SC2[Short-circuit out-of-scope response]
+    AT -->|clarification| SC3[Short-circuit clarification response]
+    AT -->|investment_decision| I[interpret]
+    I --> G[gather]
+    G --> SY[synthesize]
+    SY --> D[decide]
+    D --> AP[approval flow]
+    D --> IV[investigation record]
+    D --> RP[report/memo workflow]
 ```
 
-## C) Provider Fallback Architecture
+## C) Router to LangGraph Tool Wiring
 
 ```mermaid
-flowchart LR
-    TOOL[Tool] --> ADAPTER[Provider adapter]
-    ADAPTER --> CHECK{Real API configured and reachable?}
-    CHECK -->|Yes| REAL[Real API path]
-    CHECK -->|No| FALLBACK[Fallback path]
-    REAL --> NORM[Structured response contract]
-    FALLBACK --> NORM
-    NORM --> RET[Return typed payload to agent]
+flowchart TD
+    DR[Domain router] --> ST[suggested_tools]
+    ST --> GS[Graph state router_suggested_tools]
+    GS --> GN[gather normalizes aliases]
+    GN --> REG[Tool registry lookup]
+    REG --> RUN[Execute available tools]
+    REG --> SKIP[Skip unavailable tools]
+    RUN --> TRACE[Trace: selected/executed]
+    SKIP --> LIM[Limitations + skip reasons]
 ```
 
 ## D) Human Approval Workflow
 
 ```mermaid
 flowchart TD
-    DEC[Agent decision] --> DETECT[Sensitive action detection]
-    DETECT --> REQ{Approval required?}
-    REQ -->|No| PASS[Return decision to user]
-    REQ -->|Yes| QUEUE[Approval queue]
+    DEC[Decision generated] --> GATE{Requires approval?}
+    GATE -->|No| RET[Return answer]
+    GATE -->|Yes| REC[Create approval record]
+    REC --> UI[Approvals dashboard/page]
+    UI --> ACT{Reviewer action}
+    ACT -->|Approve| A1[approved]
+    ACT -->|Reject| A2[rejected]
+    ACT -->|More analysis| A3[needs_more_analysis]
+```
 
-    QUEUE --> ACT{Reviewer action}
-    ACT -->|Approve| APPR[approved]
-    ACT -->|Reject| REJ[rejected]
-    ACT -->|Needs more analysis| NMA[needs_more_analysis]
+## E) Investigation Workflow
 
-    APPR --> AUDIT[Audit trail]
-    REJ --> AUDIT
-    NMA --> AUDIT
+```mermaid
+flowchart TD
+    ANS[Investment response] --> MK[Create investigation record]
+    MK --> TL[Persist timeline entry]
+    TL --> PAGE[Investigations page]
+    PAGE --> LINK[Linked conversation, approval, and report context]
+```
+
+## F) Report and Memo Workflow
+
+```mermaid
+flowchart TD
+    RESP[Agent response] --> MC[memo_context]
+    MC --> RS[ReportService]
+    RS --> SEC[Report sections]
+    SEC --> RP[Reports page]
+```
+
+## G) Persistence Model
+
+```mermaid
+flowchart LR
+    APP[Application runtime] --> PG[(Postgres<br/>durable entities)]
+    APP --> RD[(Redis<br/>cache/rate-limit/memory option)]
+    APP --> QD[(Qdrant<br/>vector retrieval)]
+    APP --> MEM[(In-memory fallback<br/>demo/test)]
 ```
 
 ## Notes
 
-- Agent execution and tool/provider calls are separated so each layer can be validated independently.
-- Structured responses ensure the UI can render recommendation, evidence, approval state, and limitations consistently.
-- Fallback providers keep the product demoable when external keys are absent.
-- Approval and audit flows enforce governance for high-risk or weak-evidence recommendations.
+- Router suggestions are first-class graph input and are merged with deterministic tool logic in `gather`.
+- Tool orchestration trace tracks selected tools, executed tools, skipped tools, and limitations.
+- Investigations and reports are persisted entities, not transient UI-only artifacts.

@@ -253,6 +253,12 @@ class ChatService:
             "previous_decisions": list(history.get("metadata", [])),
             "detected_language": detected_language,
             "response_language": response_language,
+            "router_answer_type": route.answer_type,
+            "router_intent": route.intent,
+            "router_confidence": route.confidence,
+            "router_reason": route.reason,
+            "router_suggested_tools": list(route.suggested_tools),
+            "router_language": route.language,
         }
 
         if self._settings.is_dev:
@@ -264,6 +270,7 @@ class ChatService:
                 domain_route_answer_type=route.answer_type,
                 domain_route_intent=route.intent,
                 domain_route_suggested_tools=list(route.suggested_tools),
+                graph_input_suggested_tools=list(initial_state.get("router_suggested_tools", [])),
             )
         final_state: AgentState = self._graph.invoke(
             initial_state,
@@ -276,6 +283,13 @@ class ChatService:
                 conversation_id=conversation_id,
                 user_id=user.id,
                 graph_intent=final_state.get("intent"),
+                routing_intent=route.intent,
+                routing_suggested_tools=list(route.suggested_tools),
+                gather_selected_tools_before=list(final_state.get("gather_selected_tools_before", [])),
+                gather_selected_tools_after=list(final_state.get("gather_selected_tools_after", [])),
+                tools_executed=list(final_state.get("tools_executed", [])),
+                tools_skipped=list(final_state.get("tools_skipped", [])),
+                skip_reasons=list(final_state.get("skip_reasons", [])),
                 graph_used_tools=list(final_state.get("used_tools", [])),
                 evidence_count=len(final_state.get("evidence", [])),
             )
@@ -597,7 +611,7 @@ def _build_checkpointer(*, enabled: bool) -> Any | None:
         return None
 
 
-def _analysis_limitations(*, rag_chunks: list[dict[str, Any]]) -> list[str]:
+def _analysis_limitations(*, rag_chunks: list[dict[str, Any]], extra: list[str] | None = None) -> list[str]:
     lines = [
         LIMITATIONS_TEXT,
         "Benchmark performance requires external provider connectivity.",
@@ -607,6 +621,9 @@ def _analysis_limitations(*, rag_chunks: list[dict[str, Any]]) -> list[str]:
             1,
             "RAG evidence reflects currently indexed internal documents only.",
         )
+    for item in extra or []:
+        if item and item not in lines:
+            lines.append(item)
     return lines
 
 
@@ -717,11 +734,19 @@ def _to_response(
             rag_chunks=rag_chunks,
             provider_modes=provider_modes,
         ),
-        limitations=_analysis_limitations(rag_chunks=rag_chunks),
+        limitations=_analysis_limitations(
+            rag_chunks=rag_chunks,
+            extra=list(state.get("tool_limitations", [])),
+        ),
         disclaimer=DISCLAIMER_TEXT,
         orchestration_trace={
             "intent_detected": decision.intent,
             "tools_selected": tools_used,
+            "gather_selected_tools_before": list(state.get("gather_selected_tools_before", [])),
+            "gather_selected_tools_after": list(state.get("gather_selected_tools_after", [])),
+            "tools_executed": list(state.get("tools_executed", [])),
+            "tools_skipped": list(state.get("tools_skipped", [])),
+            "skip_reasons": list(state.get("skip_reasons", [])),
             "evidence_gathered": [item.title for item in evidence_items],
             "rag_retrieval_status": rag_status,
             "retrieval_mode": retrieval_mode,

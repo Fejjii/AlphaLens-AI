@@ -45,6 +45,7 @@ import { stripUndefinedDeep } from "@/lib/reportMemoPayload";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/backend";
 const DEFAULT_TIMEOUT_MS = 8000;
+const CHAT_TIMEOUT_MS = 45000;
 
 function normalizeSpeechProviderMode(raw: unknown): NonNullable<TranscriptionResult["provider_mode"]> {
   if (raw === "real" || raw === "openai") return "real";
@@ -53,6 +54,12 @@ function normalizeSpeechProviderMode(raw: unknown): NonNullable<TranscriptionRes
 
 export type TranscriptionApiResult = {
   result: TranscriptionResult;
+  httpStatus: number;
+  clientRequestId: string;
+};
+
+export type ChatApiResult = {
+  result: ChatResponse;
   httpStatus: number;
   clientRequestId: string;
 };
@@ -403,16 +410,43 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  chat: (payload: ChatRequest) => {
-    const requestId =
-      typeof globalThis.crypto !== "undefined" && "randomUUID" in globalThis.crypto
+  chat: async (
+    payload: ChatRequest,
+    options?: { clientRequestId?: string },
+  ): Promise<ChatApiResult> => {
+    const clientRequestId =
+      options?.clientRequestId ??
+      (typeof globalThis.crypto !== "undefined" && "randomUUID" in globalThis.crypto
         ? globalThis.crypto.randomUUID()
-        : `req_${Date.now().toString(36)}`;
-    return request<ChatResponse>("/agent/chat", {
+        : `req_${Date.now().toString(36)}`);
+    const response = await fetch(`${API_URL}/agent/chat`, {
       method: "POST",
       body: JSON.stringify(payload),
-      headers: { "X-Request-Id": requestId },
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-Request-Id": clientRequestId,
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(CHAT_TIMEOUT_MS),
     });
+    if (!response.ok) {
+      let detail: unknown;
+      try {
+        const body = (await response.json()) as Record<string, unknown>;
+        detail = "detail" in body && body.detail !== undefined ? body.detail : body;
+      } catch {
+        detail = undefined;
+      }
+      const message = formatErrorDetail(detail) ?? `Request failed: ${response.status}`;
+      throw new ApiError(message, response.status, detail, clientRequestId);
+    }
+    return {
+      result: (await response.json()) as ChatResponse,
+      httpStatus: response.status,
+      clientRequestId,
+    };
   },
   createConversation: (payload?: { title?: string | null }) =>
     request<ConversationSummary>("/conversations", {

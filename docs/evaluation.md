@@ -1,44 +1,45 @@
-# Evaluation and Quality Controls
+# Evaluation
 
-## Current Validation Controls
+## 1) Backend Tests
 
-1. Backend pytest suite
-   - comprehensive test coverage over APIs, services, and agent behavior.
-2. Agent routing regression tests
-   - verifies intent/tool routing stability and orchestration behavior.
-3. RAG retrieval tests
-   - validates ingestion and retrieval expectations.
-4. Speech tests
-   - validates transcription pathway behavior and fallback handling.
-5. Auth and quota tests
-   - checks login/session controls and plan limit logic.
-6. Repository and persistence tests
-   - validates storage abstractions and persistence behavior.
-7. Frontend lint
-   - ensures TypeScript/React code quality baseline.
-8. Frontend build
-   - ensures production build integrity.
-9. Docker validation
-   - validates containerized build/runtime posture.
-10. CI workflows
-   - automated backend/frontend/docker/security checks via GitHub Actions.
+Primary automated validation is the `pytest` suite. Latest full run in this repo state: `312 passed, 1 skipped, 6 warnings`.
 
-## Recommended Future Evaluation Program
+Coverage focus includes:
 
-- RAGAS for retrieval quality benchmarking
-- golden query set for deterministic regression checks
-- LLM as judge evaluations with strict rubrics
-- LangSmith trace review for orchestration diagnostics
-- tool call accuracy metrics
-- citation faithfulness checks
-- response groundedness scoring
-- portfolio calculation tests against known expected outputs
-- scenario simulation validation with fixed fixtures
-- red teaming for prompt injection
-- load testing for API and workflow resilience
+- Router tests
+- Router-to-tool wiring tests
+- RAG tests
+- Memo/report tests
+- Investigation tests
+- Auth tests
+- Speech tests
+- Approval tests
 
-## Suggested Evaluation Cadence
+## 2) Frontend Validation
 
-- per PR: unit/integration + lint/build + security checks
-- nightly: expanded regression set and deterministic prompt suites
-- release gate: golden set pass, manual trace audit, smoke tests on deployed stack
+- `pnpm lint`
+- `pnpm build`
+
+## 3) Manual Acceptance Checklist
+
+- Agent routing (`app_help`, `out_of_scope`, `clarification`, `investment_decision`)
+- RAG policy responses and source trace
+- SEC prompt behavior
+- Macro prompt behavior
+- Scenario prompt behavior
+- Memo generation
+- Investigations persistence
+- Approvals workflow
+- Feedback submission
+- Auth persistence and expired token handling
+
+## 4) Suggested Future Evaluation
+
+- Golden prompt dataset for release gating
+- Tool-selection accuracy scorecards
+- RAGAS retrieval/evidence benchmarking
+- LLM-as-judge rubric evaluations
+- Faithfulness checks
+- Citation quality scoring
+- Feedback-driven evaluation loop
+- LangSmith trace review workflow
