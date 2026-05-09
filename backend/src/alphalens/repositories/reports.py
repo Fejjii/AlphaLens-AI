@@ -7,9 +7,16 @@ from typing import Protocol
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from alphalens.core.json_safe import to_json_safe
 from alphalens.infrastructure.models import ReportModel
 from alphalens.schemas.agent import EvidenceItem
-from alphalens.schemas.report import ReportResponse, ReportSection, ReportStatus, ReportType
+from alphalens.schemas.report import (
+    ReportGenerationMeta,
+    ReportResponse,
+    ReportSection,
+    ReportStatus,
+    ReportType,
+)
 
 
 class ReportRepository(Protocol):
@@ -73,6 +80,9 @@ class SqlAlchemyReportRepository(ReportRepository):
 
 
 def _to_model(report: ReportResponse) -> ReportModel:
+    sections = to_json_safe([section.model_dump(mode="python") for section in report.sections])
+    evidence = to_json_safe([item.model_dump(mode="python") for item in report.evidence])
+    memo_meta = to_json_safe(report.memo_metadata.model_dump(mode="python"))
     return ReportModel(
         id=report.id,
         user_id=report.user_id,
@@ -82,9 +92,10 @@ def _to_model(report: ReportResponse) -> ReportModel:
         source_response_id=report.source_response_id,
         ticker=report.ticker,
         status=report.status.value,
-        sections=[section.model_dump(mode="json") for section in report.sections],
-        evidence=[item.model_dump(mode="json") for item in report.evidence],
-        citations=report.citations,
+        sections=sections if isinstance(sections, list) else [],
+        evidence=evidence if isinstance(evidence, list) else [],
+        citations=list(report.citations),
+        memo_metadata=memo_meta if isinstance(memo_meta, dict) else {},
         created_at=report.created_at,
         updated_at=report.updated_at,
     )
@@ -103,6 +114,7 @@ def _to_schema(model: ReportModel) -> ReportResponse:
         sections=[ReportSection.model_validate(item) for item in model.sections],
         evidence=[EvidenceItem.model_validate(item) for item in model.evidence],
         citations=list(model.citations),
+        memo_metadata=ReportGenerationMeta.model_validate(model.memo_metadata or {}),
         created_at=model.created_at,
         updated_at=model.updated_at,
     )

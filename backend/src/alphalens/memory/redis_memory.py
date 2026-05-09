@@ -106,5 +106,41 @@ class RedisMemoryStore(MemoryStore):
                 error=str(exc),
             )
 
+    def list_conversations(self, *, user_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._fallback.list_conversations(user_id=user_id, limit=limit)
+        if self._client is None:
+            return rows
+        try:
+            pattern = self._key(f"{user_id}:*")
+            for redis_key in self._client.scan_iter(match=pattern, count=100):
+                key_str = (
+                    redis_key.decode("utf-8", errors="replace")
+                    if isinstance(redis_key, (bytes, bytearray))
+                    else str(redis_key)
+                )
+                raw = self._client.get(redis_key)
+                if raw is None:
+                    continue
+                try:
+                    state = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(state, dict):
+                    continue
+                prefix = "alphalens:memory:"
+                conversation_id = key_str[len(prefix) :] if key_str.startswith(prefix) else key_str
+                rows.append({"conversation_id": conversation_id, "state": state})
+        except Exception as exc:
+            logger.warning("redis_memory_list_failed", user_id=user_id, error=str(exc))
+        deduped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            deduped[str(row["conversation_id"])] = row
+        merged = list(deduped.values())
+        merged.sort(
+            key=lambda item: str(item["state"].get("updated_at") or ""),
+            reverse=True,
+        )
+        return merged[:limit]
+
     def _key(self, conversation_id: str) -> str:
         return f"alphalens:memory:{conversation_id}"

@@ -7,9 +7,34 @@ is rejected at the boundary rather than poisoning agent state.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field
 
 from alphalens.schemas.common import APIModel
+
+RouteAnswerType = Literal["investment_decision", "app_help", "out_of_scope", "clarification"]
+RouteLanguage = Literal["en", "de", "fr", "ar", "unknown"]
+
+
+class RouteClassification(APIModel):
+    """LLM-only structured router output (strict JSON via OpenAI parse)."""
+
+    answer_type: RouteAnswerType
+    intent: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description=(
+            "portfolio_performance | policy_check | rag_question | market_news | macro | "
+            "sec_filings | reports | scenarios | approvals | app_capability | app_usage | "
+            "unrelated | ambiguous"
+        ),
+    )
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    language: RouteLanguage = "unknown"
+    reason: str = Field(default="", max_length=600)
+    suggested_tools: list[str] = Field(default_factory=list)
 
 
 class IntentClassification(APIModel):

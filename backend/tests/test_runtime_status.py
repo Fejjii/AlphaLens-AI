@@ -17,6 +17,7 @@ async def _runtime_status_payload(
     app_env: str,
     persistence_backend: str,
     app_database_url: str | None,
+    serper_api_key: str | None = None,
 ) -> dict[str, object]:
     monkeypatch.setenv("APP_ENV", app_env)
     monkeypatch.setenv("PERSISTENCE_BACKEND", persistence_backend)
@@ -26,6 +27,10 @@ async def _runtime_status_payload(
     else:
         monkeypatch.setenv("APP_DATABASE_URL", app_database_url)
         monkeypatch.setenv("DATABASE_URL", app_database_url)
+    if serper_api_key is None:
+        monkeypatch.delenv("SERPER_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("SERPER_API_KEY", serper_api_key)
 
     get_settings.cache_clear()
     deps._persistence_runtime_state.cache_clear()
@@ -80,3 +85,21 @@ async def test_runtime_status_reports_memory_fallback_when_database_missing(
     assert payload["data_sources"]["reports"] == "memory"
     assert payload["data_sources"]["feedback"] == "memory"
     assert payload["data_sources"]["usage"] == "memory"
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_reports_live_web_news_when_serper_configured(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    payload = await _runtime_status_payload(
+        monkeypatch=monkeypatch,
+        app_env="test",
+        persistence_backend="in_memory",
+        app_database_url=None,
+        serper_api_key="test-serper-key",
+    )
+
+    web_news = next(item for item in payload["providers"] if item["name"] == "Web/News")
+    assert web_news["status"] == "real"
+    assert payload["workspace_mode"] == "live"
+    assert payload["data_sources"]["external_web_news"] == "serper"

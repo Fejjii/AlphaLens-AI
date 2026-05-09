@@ -23,6 +23,19 @@ _KNOWN_TICKERS: frozenset[str] = frozenset(
 )
 
 _INTENT_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "scenario_simulation": (
+        "what if",
+        "what happens if",
+        "stress scenario",
+        "scenario analysis",
+        "price shock",
+        "monte carlo",
+        "drops ",
+        "drop ",
+        "if nvda",
+        "if msft",
+        "if aapl",
+    ),
     "portfolio_review": ("portfolio", "holdings", "exposure", "weights", "nav"),
     "risk_check": ("risk", "concentration", "drawdown", "limit", "sector"),
     "trade_idea": ("buy", "sell", "trim", "add", "increase", "decrease", "trade"),
@@ -80,6 +93,7 @@ _INTENT_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 _INTENT_PRIORITY: tuple[str, ...] = (
     "policy_breach_check",
+    "scenario_simulation",
     "portfolio_performance",
     "rag_policy_question",
     "investment_recommendation",
@@ -170,6 +184,7 @@ class DeterministicFallbackLLMClient(LLMClient):
             "portfolio_review",
             "risk_check",
             "trade_idea",
+            "scenario_simulation",
         } or recommendation_context
         needs_risk_check = intent in {
             "policy_breach_check",
@@ -185,7 +200,7 @@ class DeterministicFallbackLLMClient(LLMClient):
             "market_news_question",
             "trade_idea",
             "market_news",
-        } or bool(tickers)
+        } or (bool(tickers) and intent != "scenario_simulation")
         needs_rag = rag_requested or intent in {
             "research",
             "trade_idea",

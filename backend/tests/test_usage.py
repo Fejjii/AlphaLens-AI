@@ -18,7 +18,7 @@ from alphalens.services.usage_service import UsageService
 from alphalens.tools.market_data_tool import make_market_data_tool
 from alphalens.tools.portfolio_tool import make_portfolio_tool
 from alphalens.tools.rag_tool import make_rag_tool
-from alphalens.tools.registry import ToolRegistry
+from alphalens.tools.registry import Tool, ToolRegistry, ToolResult
 from alphalens.tools.risk_tool import make_risk_tool
 
 
@@ -147,6 +147,33 @@ def test_tool_usage_captures_provider(tmp_path: Path, kb_dir: Path) -> None:
     assert len(events) == 1
     assert events[0].provider == "fallback"
     assert events[0].tool_name == "market_quote"
+
+
+def test_tool_usage_metadata_captures_fallback_flags() -> None:
+    usage = UsageService()
+    registry = ToolRegistry(usage_service=usage)
+    registry.register(
+        Tool(
+            name="web_search",
+            description="test",
+            parameters={},
+            func=lambda **_: ToolResult(
+                name="web_search",
+                summary="ok",
+                data={
+                    "provider": "fallback",
+                    "fallback_used": True,
+                    "provider_source": "fallback_on_error",
+                },
+            ),
+        )
+    )
+
+    registry.call("web_search")
+    events = usage.list_usage_events()
+    assert len(events) == 1
+    assert events[0].metadata.get("fallback_used") is True
+    assert events[0].metadata.get("provider_source") == "fallback_on_error"
 
 
 # ---------------------------------------------------------------------------

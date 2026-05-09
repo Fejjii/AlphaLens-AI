@@ -265,8 +265,12 @@ async def test_speech_transcribe_without_auth_returns_401(client: AsyncClient) -
     response = await client.post("/speech/transcribe", files=files)
     assert response.status_code == 401
     detail = response.json().get("detail", "")
-    assert isinstance(detail, str)
-    assert "credentials were not provided" in detail.lower()
+    if isinstance(detail, dict):
+        message = str(detail.get("message", "")).lower()
+        assert "credentials were not provided" in message
+    else:
+        assert isinstance(detail, str)
+        assert "credentials were not provided" in detail.lower()
 
 
 async def test_speech_endpoint_real_provider_error_returns_503() -> None:

@@ -15,8 +15,10 @@ from alphalens.api.routers import (
     agent,
     approvals,
     auth,
+    conversations,
     feedback,
     health,
+    investigations,
     knowledge,
     memory,
     plans,
@@ -33,6 +35,7 @@ from alphalens.core.errors import register_exception_handlers
 from alphalens.core.logging import configure_logging, get_logger
 from alphalens.infrastructure.database import create_engine_from_settings
 from alphalens.infrastructure.models import Base
+from alphalens.infrastructure.schema_guards import ensure_dev_report_table_schema
 from alphalens.infrastructure.observability.langsmith import setup_langsmith
 
 
@@ -53,6 +56,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             engine = create_engine_from_settings(settings)
             Base.metadata.create_all(bind=engine)
+            ensure_dev_report_table_schema(engine, app_env=settings.app_env)
             deps._persistence_runtime_state.cache_clear()
             deps._approval_repository.cache_clear()
             deps._approvals_service.cache_clear()
@@ -61,6 +65,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             deps._auth_service.cache_clear()
             deps._feedback_repository.cache_clear()
             deps._report_repository.cache_clear()
+            deps._investigation_repository.cache_clear()
+            deps._investigations_service.cache_clear()
             deps._scenario_repository.cache_clear()
             deps._usage_service.cache_clear()
             deps._memory_service.cache_clear()
@@ -114,12 +120,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(agent.public_router)
     app.include_router(speech.router)
     app.include_router(memory.router)
+    app.include_router(conversations.router)
     app.include_router(rag.router)
     app.include_router(knowledge.router)
     app.include_router(runtime.router)
     app.include_router(usage.router)
     app.include_router(feedback.router)
     app.include_router(reports.router)
+    app.include_router(investigations.router)
     app.include_router(scenarios.router)
 
     return app

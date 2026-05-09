@@ -75,6 +75,35 @@ class ReportModel(Base):
     sections: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
     evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
     citations: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    memo_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class InvestigationModel(Base):
+    __tablename__ = "investigations"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    conversation_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_response_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    intent: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    subject: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    recommendation: Mapped[str] = mapped_column(String(32), nullable=False)
+    risk_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tools_used: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    evidence_items: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    rag_sources: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    provider_modes: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    data_used: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    orchestration_trace: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    approval_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    report_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    limitations: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

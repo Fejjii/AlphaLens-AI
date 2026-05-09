@@ -23,7 +23,7 @@ from alphalens.integrations.llm import (
     LLMError,
     OpenAILLMClient,
 )
-from alphalens.schemas.llm import DecisionSynthesis, IntentClassification
+from alphalens.schemas.llm import DecisionSynthesis, IntentClassification, RouteClassification
 
 logger = get_logger(__name__)
 
@@ -50,6 +50,31 @@ class LLMService:
     def using_llm(self) -> bool:
         """True when an LLM-backed primary is configured."""
         return self._primary is not None
+
+    def classify_route(
+        self,
+        *,
+        message: str,
+        conversation_id: str | None = None,
+    ) -> RouteClassification:
+        """Structured domain route using the primary OpenAI client only."""
+
+        meta = {"conversation_id": conversation_id, "input": message}
+        if self._primary is None:
+            raise LLMError("classify_route requires a configured OpenAI client")
+        classify = getattr(self._primary, "classify_route", None)
+        if classify is None:
+            raise LLMError("primary LLM client does not support classify_route")
+        with trace_llm_call("classify_route", metadata=meta):
+            try:
+                result = classify(message=message)
+                self._record_llm("classify_route", conversation_id)
+                return result
+            except LLMError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("classify_route_failed", error=str(exc))
+                raise LLMError(f"classify_route failed: {exc}") from exc
 
     def classify_intent(
         self,

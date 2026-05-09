@@ -46,6 +46,29 @@ async def test_list_approvals(
     assert body[0]["status"] == "pending"
 
 
+async def test_pending_ids_from_list_are_actionable(
+    client: AsyncClient,
+    auth_session: dict[str, object],
+) -> None:
+    user_id = str(auth_session["user"]["id"])  # type: ignore[index]
+    auth_headers = auth_session["headers"]  # type: ignore[assignment]
+    _seed_pending_approval(user_id=user_id)
+
+    list_response = await client.get("/approvals", params={"status": "pending"}, headers=auth_headers)
+    assert list_response.status_code == 200
+    pending_items = list_response.json()
+    assert pending_items
+    actionable_id = pending_items[0]["approval_id"]
+
+    decide_response = await client.post(
+        f"/approvals/{actionable_id}/decision",
+        json={"status": "approved", "reviewer_note": "Approved from listed pending queue."},
+        headers=auth_headers,
+    )
+    assert decide_response.status_code == 200
+    assert decide_response.json()["status"] == "approved"
+
+
 async def test_get_approval_by_id(client: AsyncClient, auth_session: dict[str, object]) -> None:
     user_id = str(auth_session["user"]["id"])  # type: ignore[index]
     auth_headers = auth_session["headers"]  # type: ignore[assignment]

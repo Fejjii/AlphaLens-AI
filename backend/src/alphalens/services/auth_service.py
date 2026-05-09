@@ -36,6 +36,10 @@ class AuthError(Exception):
     """Raised when authentication fails."""
 
 
+class TokenExpiredError(AuthError):
+    """Raised when the access token is past its expiry."""
+
+
 class InactiveUserError(AuthError):
     """Raised when an inactive user tries to authenticate."""
 
@@ -118,11 +122,16 @@ class AuthService:
         )
 
     def decode_access_token(self, token: str) -> TokenClaims:
-        payload = jwt.decode(
-            token,
-            self._settings.auth_secret_key,
-            algorithms=[self._settings.auth_algorithm],
-        )
+        try:
+            payload = jwt.decode(
+                token,
+                self._settings.auth_secret_key,
+                algorithms=[self._settings.auth_algorithm],
+            )
+        except jwt.ExpiredSignatureError as exc:
+            raise TokenExpiredError("Access token has expired.") from exc
+        except jwt.InvalidTokenError as exc:
+            raise AuthError("Invalid access token.") from exc
         claims = TokenClaims.model_validate(payload)
         if not claims.is_active:
             raise InactiveUserError("This user account is inactive.")

@@ -9,15 +9,41 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { serverApi } from "@/lib/api.server";
 import { formatCurrency, formatPercent } from "@/lib/utils";
+import type { Approval } from "@/types/api";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [portfolio, approvals, usageSummary] = await Promise.all([
+  const [portfolio, usageSummary] = await Promise.all([
     serverApi.portfolioSummary(),
-    serverApi.approvals("pending"),
     serverApi.fetchUsageSummary(),
   ]);
+  let approvals: Approval[] = [];
+  let approvalsUnavailableReason: string | null = null;
+  try {
+    approvals = await serverApi.approvals("pending");
+    if (process.env.NODE_ENV === "development") {
+      // eslint-disable-next-line no-console
+      console.debug("[dashboard] pending approvals source", {
+        source: "backend",
+        route: "/approvals?status=pending",
+        fallback_used: false,
+        count: approvals.length,
+        approval_ids: approvals.map((approval) => approval.approval_id),
+      });
+    }
+  } catch (error) {
+    approvalsUnavailableReason = error instanceof Error ? error.message : "Unknown backend error";
+    if (process.env.NODE_ENV === "development") {
+      // eslint-disable-next-line no-console
+      console.error("[dashboard] pending approvals unavailable", {
+        source: "backend",
+        route: "/approvals?status=pending",
+        fallback_used: false,
+        error: approvalsUnavailableReason,
+      });
+    }
+  }
 
   const sharpe = portfolio.risk_metrics.find((m) => m.name === "sharpe");
   const drawdown = portfolio.risk_metrics.find((m) => m.name === "max_drawdown");
@@ -146,7 +172,10 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        <PendingApprovalsPanel initialApprovals={approvals} />
+        <PendingApprovalsPanel
+          initialApprovals={approvals}
+          unavailableReason={approvalsUnavailableReason}
+        />
       </div>
     </div>
   );

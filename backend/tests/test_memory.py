@@ -8,7 +8,11 @@ from httpx import AsyncClient
 
 from alphalens.core.config import Settings
 from alphalens.memory.in_memory import InMemoryMemoryStore
+from alphalens.memory.sqlalchemy_memory import SqlAlchemyMemoryStore
 from alphalens.memory.service import MemoryService, build_memory_store
+from alphalens.infrastructure.database import Base
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from alphalens.schemas.agent import ChatMessage, ChatRequest, ChatRole
 from alphalens.services.approvals_service import ApprovalsService
 from alphalens.services.chat_service import ChatService
@@ -110,6 +114,127 @@ async def test_memory_can_be_cleared_via_api(
     assert memory_response.json()["metadata"] == []
 
 
+async def test_conversation_endpoints_list_and_detail(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    post = await client.post(
+        "/agent/chat",
+        json={"messages": [{"role": "user", "content": "Track this conversation please."}]},
+        headers=auth_headers,
+    )
+    assert post.status_code == 200
+    conversation_id = post.json()["conversation_id"]
+
+    listed = await client.get("/conversations", headers=auth_headers)
+    assert listed.status_code == 200
+    conversations = listed.json()
+    assert any(item["conversation_id"] == conversation_id for item in conversations)
+
+    detail = await client.get(f"/conversations/{conversation_id}", headers=auth_headers)
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["conversation_id"] == conversation_id
+    assert len(body["messages"]) >= 2
+    assert body["messages"][0]["role"] == "user"
+    assert body["messages"][1]["role"] == "assistant"
+
+
+async def test_conversation_is_user_scoped(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    first = await client.post(
+        "/agent/chat",
+        json={"messages": [{"role": "user", "content": "Private conversation."}]},
+        headers=auth_headers,
+    )
+    assert first.status_code == 200
+    conversation_id = first.json()["conversation_id"]
+
+    second_user = await client.post(
+        "/auth/register",
+        json={
+            "email": "second.user@example.com",
+            "password": "Password123!",
+            "full_name": "Second User",
+        },
+    )
+    assert second_user.status_code == 200
+    second_headers = {"Authorization": f"Bearer {second_user.json()['access_token']}"}
+
+    other_detail = await client.get(f"/conversations/{conversation_id}", headers=second_headers)
+    assert other_detail.status_code == 404
+
+
+async def test_list_conversations_excludes_empty_created_thread(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = await client.post("/conversations", json={}, headers=auth_headers)
+    assert created.status_code == 201
+    listed = await client.get("/conversations", headers=auth_headers)
+    assert listed.status_code == 200
+    ids = {item["conversation_id"] for item in listed.json()}
+    assert created.json()["conversation_id"] not in ids
+
+
+async def test_listed_conversation_ids_are_loadable(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    for content in ("Alpha listable thread one.", "Alpha listable thread two."):
+        post = await client.post(
+            "/agent/chat",
+            json={"messages": [{"role": "user", "content": content}]},
+            headers=auth_headers,
+        )
+        assert post.status_code == 200
+    listed = await client.get("/conversations", headers=auth_headers)
+    assert listed.status_code == 200
+    for item in listed.json():
+        detail = await client.get(f"/conversations/{item['conversation_id']}", headers=auth_headers)
+        assert detail.status_code == 200
+        body = detail.json()
+        assert body["conversation_id"] == item["conversation_id"]
+        assert len(body["messages"]) >= 2
+
+
+async def test_conversation_title_derived_from_first_user_message(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    marker = "unique_title_marker_99431"
+    post = await client.post(
+        "/agent/chat",
+        json={"messages": [{"role": "user", "content": f"Start here {marker} and more text after."}]},
+        headers=auth_headers,
+    )
+    assert post.status_code == 200
+    conversation_id = post.json()["conversation_id"]
+    listed = await client.get("/conversations", headers=auth_headers)
+    row = next(item for item in listed.json() if item["conversation_id"] == conversation_id)
+    assert marker in row["title"]
+
+
+async def test_delete_conversation_endpoint_clears_messages(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    post = await client.post(
+        "/agent/chat",
+        json={"messages": [{"role": "user", "content": "Delete this thread."}]},
+        headers=auth_headers,
+    )
+    conversation_id = post.json()["conversation_id"]
+
+    deleted = await client.delete(f"/conversations/{conversation_id}", headers=auth_headers)
+    assert deleted.status_code == 204
+
+    detail = await client.get(f"/conversations/{conversation_id}", headers=auth_headers)
+    assert detail.status_code == 404
+
+
 def test_second_chat_with_same_conversation_id_sees_previous_messages(
     tmp_path: Path,
 ) -> None:
@@ -189,3 +314,26 @@ def test_redis_unavailable_falls_back_safely() -> None:
     history = service.get_history("conv_redis")
     assert len(history["messages"]) == 2
     assert history["messages"][0]["content"] == "hi"
+
+
+def test_messages_survive_sqlalchemy_store_recreation(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "memory.db"
+    engine = create_engine(f"sqlite+pysqlite:///{sqlite_path}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False, future=True)
+
+    store1 = SqlAlchemyMemoryStore(session_factory)
+    service1 = MemoryService(store=store1, enabled=True)
+    service1.save_turn(
+        "conv_sqlite",
+        user_id="usr_test",
+        user_message={"role": "user", "content": "hello"},
+        assistant_message={"role": "assistant", "content": "hi"},
+        metadata={"intent": "general"},
+    )
+
+    store2 = SqlAlchemyMemoryStore(session_factory)
+    service2 = MemoryService(store=store2, enabled=True)
+    history = service2.get_history("conv_sqlite", user_id="usr_test")
+    assert len(history["messages"]) == 2
+    assert history["messages"][0]["content"] == "hello"

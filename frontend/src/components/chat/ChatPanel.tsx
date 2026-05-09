@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { MutableRefObject, ReactNode } from "react";
 import {
@@ -14,8 +15,6 @@ import {
   StopCircle,
   Upload,
   Volume2,
-  WandSparkles,
-  Wrench,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -31,13 +30,17 @@ import {
   RiskBadge,
 } from "@/components/ui/status-badges";
 import { emitPlanUsageChanged } from "@/lib/app-events";
-import { ApiError, api } from "@/lib/api";
+import { ApiError, api, formatMemoReportError } from "@/lib/api";
+import { buildInvestmentMemoReportPayload } from "@/lib/reportMemoPayload";
 import { cn } from "@/lib/utils";
 import type {
   AgentDecision,
+  ChatAnswerType,
   ChatMessage,
+  ChatRouting,
   Citation,
   ChatResponse,
+  ConversationSummary,
   FeedbackCategory,
   FeedbackRating,
   SpeechCapabilities,
@@ -52,6 +55,10 @@ interface ChatTurn {
   responseId?: string | null;
   usedTools?: string[];
   analysis?: ChatResponse["analysis"];
+  /** Present for assistant turns; drives investment vs simple card. */
+  answerType?: ChatAnswerType;
+  routing?: ChatRouting;
+  investigationId?: string | null;
 }
 
 const SEED: ChatTurn[] = [
@@ -119,10 +126,98 @@ const AVAILABLE_TOOLS = [
   { label: "RAG", description: "internal vector knowledge base retrieval" },
 ] as const;
 
+function normalizeAnswerType(raw: unknown): ChatAnswerType | undefined {
+  if (
+    raw === "app_help" ||
+    raw === "out_of_scope" ||
+    raw === "investment_decision" ||
+    raw === "clarification"
+  ) {
+    return raw;
+  }
+  return undefined;
+}
+
+function conversationMessagesToTurns(messages: ChatMessage[], convId: string): ChatTurn[] {
+  return messages.map((message, idx) => {
+    if (message.role === "user") {
+      return {
+        id: `h_${convId}_u_${idx}`,
+        message: { role: "user", content: message.content },
+      };
+    }
+    const metadata = (message.metadata ?? {}) as Record<string, unknown>;
+    const analysisCandidate = metadata.analysis;
+    const decisionCandidate = metadata.decision;
+    const citationsCandidate = metadata.citations;
+    const toolsCandidate = metadata.tools_used;
+    const routingCandidate = metadata.routing;
+    const investigationCandidate = metadata.investigation_id;
+    const routing =
+      routingCandidate && typeof routingCandidate === "object"
+        ? (routingCandidate as ChatRouting)
+        : undefined;
+    const intentRaw = typeof metadata.intent === "string" ? metadata.intent : "";
+    const answerTypeRaw = normalizeAnswerType(
+      (routing?.answer_type as string | undefined) ?? metadata.answer_type,
+    );
+    const prev = idx > 0 ? messages[idx - 1] : null;
+    const prevUserContent = prev?.role === "user" ? prev.content : "";
+    const userHintsInvestment =
+      /\b(portfolio|holding|holdings|nav|pnl|mandate|breach|rag|knowledge\s*base|nvda|msft|aapl|trim|rebalance|buy|sell|policy|10-?k|sec|filing)\b/i.test(
+        prevUserContent,
+      );
+    let answerType: ChatAnswerType;
+    if (intentRaw === "general_question") {
+      answerType =
+        answerTypeRaw != null && answerTypeRaw !== "investment_decision"
+          ? answerTypeRaw
+          : "app_help";
+    } else if (answerTypeRaw != null) {
+      answerType = answerTypeRaw;
+    } else if (decisionCandidate && typeof decisionCandidate === "object") {
+      answerType = userHintsInvestment ? "investment_decision" : "app_help";
+    } else {
+      answerType = "app_help";
+    }
+    return {
+      id: `h_${convId}_a_${idx}`,
+      message: { role: "assistant", content: message.content },
+      analysis: (analysisCandidate ?? undefined) as ChatResponse["analysis"] | undefined,
+      decision: (decisionCandidate ?? undefined) as AgentDecision | null | undefined,
+      citations: Array.isArray(citationsCandidate) ? (citationsCandidate as Citation[]) : undefined,
+      usedTools: Array.isArray(toolsCandidate) ? (toolsCandidate as string[]) : undefined,
+      responseId: typeof metadata.response_id === "string" ? metadata.response_id : null,
+      answerType,
+      routing,
+      investigationId:
+        typeof investigationCandidate === "string" ? investigationCandidate : null,
+    };
+  });
+}
+
+function formatRelativeUpdated(iso: string): string {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const deltaSec = Math.round((Date.now() - t) / 1000);
+  if (deltaSec < 60) return "just now";
+  if (deltaSec < 3600) return `${Math.floor(deltaSec / 60)}m ago`;
+  if (deltaSec < 86400) return `${Math.floor(deltaSec / 3600)}h ago`;
+  if (deltaSec < 604800) return `${Math.floor(deltaSec / 86400)}d ago`;
+  return new Date(t).toLocaleDateString();
+}
+
 export function ChatPanel() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [turns, setTurns] = useState<ChatTurn[]>(SEED);
   const [input, setInput] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [recentConversations, setRecentConversations] = useState<ConversationSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [transcribingSource, setTranscribingSource] = useState<"recording" | "upload" | null>(null);
@@ -162,6 +257,32 @@ export function ChatPanel() {
   const lastInsertedSpeechKeyRef = useRef<string | null>(null);
   const transcriptionGenerationRef = useRef(0);
   const capabilitiesRef = useRef(capabilities);
+  const isSendingRef = useRef(false);
+
+  const refreshConversations = useCallback(async () => {
+    try {
+      const items = await api.listConversations(6);
+      const seen = new Set<string>();
+      const deduped: ConversationSummary[] = [];
+      for (const item of items) {
+        if (seen.has(item.conversation_id)) continue;
+        seen.add(item.conversation_id);
+        if (item.message_count > 0) deduped.push(item);
+      }
+      setRecentConversations(deduped);
+    } catch {
+      setRecentConversations([]);
+    }
+  }, []);
+
+  const syncConversationInUrl = useCallback(
+    (id: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("conversation_id", id);
+      router.replace(`${pathname}?${params.toString()}`);
+    },
+    [pathname, router, searchParams],
+  );
 
   useEffect(() => {
     capabilitiesRef.current = capabilities;
@@ -170,6 +291,18 @@ export function ChatPanel() {
   useEffect(() => {
     inputValueRef.current = input;
   }, [input]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    // eslint-disable-next-line no-console
+    console.debug("[chat] state", {
+      conversation_id: conversationId,
+      message_count: turns.length,
+      history_loaded: !historyLoading,
+      route: `${pathname}?${searchParams.toString()}`,
+      memory_backend: "backend",
+    });
+  }, [conversationId, historyLoading, pathname, searchParams, turns.length]);
 
   useEffect(() => {
     void api
@@ -190,9 +323,117 @@ export function ChatPanel() {
     }
   }, [audioDialogOpen]);
 
+  useEffect(() => {
+    void refreshConversations();
+  }, [refreshConversations]);
+
+  useEffect(() => {
+    const presetPrompt = searchParams.get("prompt");
+    const mode = searchParams.get("mode");
+    if (mode === "investigation" && presetPrompt && !inputValueRef.current.trim()) {
+      setInput(presetPrompt);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const id = searchParams.get("conversation_id");
+    if (!id) {
+      setHistoryLoading(false);
+      setConversationId(null);
+      setTurns(SEED);
+      setHistoryError(null);
+      return;
+    }
+    let cancelled = false;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    void api
+      .getConversation(id)
+      .then((conversation) => {
+        if (cancelled) return;
+        setConversationId(id);
+        const loadedTurns =
+          conversation.messages.length > 0
+            ? conversationMessagesToTurns(conversation.messages, id)
+            : SEED;
+        setTurns(loadedTurns.length > 0 ? loadedTurns : SEED);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if (error instanceof ApiError && error.status === 404) {
+          setRecentConversations((prev) => prev.filter((c) => c.conversation_id !== id));
+          setHistoryError("This conversation no longer exists.");
+        } else {
+          setHistoryError("Unable to load conversation history.");
+        }
+        setConversationId(null);
+        router.replace(pathname);
+        setTurns(SEED);
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, pathname, router]);
+
   const refreshSpeechCapabilities = useCallback(() => {
     void api.speechCapabilities().then(setCapabilities).catch(() => undefined);
   }, []);
+
+  const startNewChat = useCallback(() => {
+    setConversationId(null);
+    setTurns(SEED);
+    setHistoryError(null);
+    router.replace(pathname);
+    void refreshConversations();
+  }, [pathname, refreshConversations, router]);
+
+  const loadConversation = useCallback(
+    async (id: string) => {
+      setHistoryLoading(true);
+      setHistoryError(null);
+      try {
+        const conversation = await api.getConversation(id);
+        const loadedTurns =
+          conversation.messages.length > 0
+            ? conversationMessagesToTurns(conversation.messages, id)
+            : SEED;
+        setConversationId(id);
+        setTurns(loadedTurns.length > 0 ? loadedTurns : SEED);
+        syncConversationInUrl(id);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          setRecentConversations((prev) => prev.filter((c) => c.conversation_id !== id));
+          setHistoryError("This conversation no longer exists.");
+        } else {
+          setHistoryError("Unable to load selected conversation.");
+        }
+        setConversationId(null);
+        router.replace(pathname);
+        setTurns(SEED);
+      } finally {
+        setHistoryLoading(false);
+      }
+    },
+    [pathname, router, syncConversationInUrl],
+  );
+
+  const deleteCurrentConversation = useCallback(async () => {
+    if (!conversationId) return;
+    try {
+      await api.deleteConversation(conversationId);
+      setRecentConversations((prev) => prev.filter((c) => c.conversation_id !== conversationId));
+      setConversationId(null);
+      setTurns(SEED);
+      setHistoryError(null);
+      router.replace(pathname);
+      await refreshConversations();
+    } catch {
+      setHistoryError("Could not delete this conversation.");
+    }
+  }, [conversationId, pathname, refreshConversations, router]);
 
   const micTranscriptionAvailable = capabilities.microphone_transcription_available;
   const requestUrlLabel = `${process.env.NEXT_PUBLIC_API_URL ?? "/api/backend"}/speech/transcribe`;
@@ -225,10 +466,16 @@ export function ChatPanel() {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const content = input.trim();
-    if (!content || pending) return;
+    if (!content || pending || isSendingRef.current) return;
+
+    isSendingRef.current = true;
+    const clientMessageId =
+      typeof globalThis.crypto !== "undefined" && "randomUUID" in globalThis.crypto
+        ? globalThis.crypto.randomUUID()
+        : `u_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
     const userTurn: ChatTurn = {
-      id: `u_${Date.now()}`,
+      id: `u_${clientMessageId}`,
       message: { role: "user", content },
     };
     setTurns((prev) => [...prev, userTurn]);
@@ -238,12 +485,14 @@ export function ChatPanel() {
 
     try {
       const response = await api.chat({
-        conversation_id: conversationId,
-        messages: [...turns, userTurn].map((t) => t.message),
+        conversation_id: conversationId ?? undefined,
+        messages: [userTurn.message],
       });
       const finalAnswer = response.analysis?.final_answer?.trim();
       const renderedContent = finalAnswer || response.message?.content?.trim() || "";
       if (!renderedContent) {
+        setTurns((prev) => prev.filter((t) => t.id !== userTurn.id));
+        setInput(content);
         setChatError(
           process.env.NODE_ENV === "development"
             ? "Malformed agent response: final_answer missing"
@@ -252,10 +501,12 @@ export function ChatPanel() {
         return;
       }
       setConversationId(response.conversation_id);
+      syncConversationInUrl(response.conversation_id);
+      const answerType: ChatAnswerType = response.answer_type ?? "investment_decision";
       setTurns((prev) => [
         ...prev,
         {
-          id: `a_${Date.now()}`,
+          id: `a_${response.response_id ?? Date.now()}`,
           message: {
             ...response.message,
             content: renderedContent,
@@ -265,15 +516,22 @@ export function ChatPanel() {
           responseId: response.response_id,
           usedTools: response.used_tools,
           analysis: response.analysis,
+          answerType,
+          routing: response.routing,
+          investigationId: response.investigation_id ?? null,
         },
       ]);
+      void refreshConversations();
     } catch (error) {
+      setTurns((prev) => prev.filter((t) => t.id !== userTurn.id));
+      setInput(content);
       if (error instanceof ApiError && error.message.trim()) {
         setChatError(error.message);
       } else {
         setChatError("Chat request failed. Check backend and retry.");
       }
     } finally {
+      isSendingRef.current = false;
       setPending(false);
     }
   };
@@ -585,6 +843,20 @@ export function ChatPanel() {
               </p>
             </div>
             <div className="max-w-xl">
+              <div className="mb-2 flex justify-end gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => void startNewChat()}>
+                  New chat
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={!conversationId}
+                  onClick={() => void deleteCurrentConversation()}
+                >
+                  Delete
+                </Button>
+              </div>
               <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                 Available tools
               </div>
@@ -601,6 +873,48 @@ export function ChatPanel() {
 
         <ScrollArea className="flex-1 px-4 md:px-6">
           <div className="space-y-4 py-5">
+            {historyLoading && (
+              <div className="max-w-2xl rounded-[0.875rem] border border-border/60 bg-card/60 px-4 py-3 text-sm text-muted-foreground">
+                Loading conversation history...
+              </div>
+            )}
+            <div className="max-w-2xl rounded-[0.875rem] border border-border/60 bg-card/60 px-4 py-3">
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                Recent chats
+              </div>
+              {recentConversations.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No previous chats yet.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {recentConversations.map((conversation) => {
+                    const label =
+                      conversation.title.length > 48
+                        ? `${conversation.title.slice(0, 48)}…`
+                        : conversation.title;
+                    const rel = formatRelativeUpdated(conversation.updated_at);
+                    return (
+                      <Button
+                        key={conversation.conversation_id}
+                        type="button"
+                        size="sm"
+                        variant={conversation.conversation_id === conversationId ? "default" : "outline"}
+                        className="h-auto max-w-[14rem] shrink-0 rounded-lg px-2.5 py-1.5 text-left font-normal"
+                        title={`${conversation.title}${rel ? ` · ${rel}` : ""}`}
+                        onClick={() => void loadConversation(conversation.conversation_id)}
+                      >
+                        <span className="line-clamp-2 break-words text-xs leading-snug">{label}</span>
+                        {rel ? (
+                          <span className="mt-0.5 block text-[10px] text-muted-foreground">{rel}</span>
+                        ) : null}
+                      </Button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            {historyError && (
+              <ErrorBanner title="Conversation history issue" message={historyError} className="max-w-2xl" />
+            )}
             {chatError && (
               <ErrorBanner
                 title="Agent chat failed"
@@ -1049,6 +1363,13 @@ function ChatBubble({
   conversationId: string | null;
 }) {
   const isAssistant = turn.message.role === "assistant";
+  const useInvestmentCard = isAssistant && turn.answerType === "investment_decision";
+  const technicalDetailsOpen =
+    typeof process !== "undefined" && process.env.NEXT_PUBLIC_DEBUG_UI === "true";
+  const executiveText = (turn.analysis?.final_answer ?? turn.message.content).trim();
+  const needsMoreAnalysis = turn.decision?.recommendation === "needs_more_analysis";
+  const lowConfidence =
+    turn.decision != null && turn.decision.confidence < 0.45 && turn.decision.recommendation !== "needs_more_analysis";
   return (
     <div className={cn("flex gap-3", !isAssistant && "flex-row-reverse")}>
       {isAssistant && (
@@ -1058,131 +1379,233 @@ function ChatBubble({
       )}
       <div
         className={cn(
-          "max-w-[88%] space-y-3 rounded-[1rem] border px-4 py-3 text-sm md:max-w-[82%]",
-          isAssistant
-            ? "border-border/70 bg-card/80 text-foreground"
-            : "border-primary/30 bg-primary text-primary-foreground shadow-[0_10px_20px_rgba(59,130,246,0.18)]",
+          "space-y-3 rounded-[1rem] border px-4 py-3 text-sm",
+          isAssistant && !useInvestmentCard ? "max-w-[min(36rem,88%)] border-border/60 bg-card/70" : null,
+          isAssistant && useInvestmentCard
+            ? "max-w-[88%] border-border/70 bg-card/80 text-foreground md:max-w-[82%]"
+            : null,
+          !isAssistant
+            ? "max-w-[88%] border-primary/30 bg-primary text-primary-foreground shadow-[0_10px_20px_rgba(59,130,246,0.18)] md:max-w-[82%]"
+            : null,
         )}
       >
         <div className="flex items-center justify-between gap-3">
           <div className={cn("text-[11px] font-semibold uppercase tracking-[0.18em]", isAssistant ? "text-muted-foreground" : "text-primary-foreground/75")}>
             {isAssistant ? "AlphaLens" : "You"}
           </div>
-          {isAssistant && turn.usedTools && turn.usedTools.length > 0 ? (
-            <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-              <Wrench className="h-3 w-3" />
-              {turn.usedTools.length} tools
-            </div>
-          ) : null}
         </div>
-        {isAssistant ? <div className="section-label">Executive answer</div> : null}
-        <p className="whitespace-pre-wrap leading-relaxed">{turn.message.content}</p>
-
-        {isAssistant && (turn.citations?.length || turn.usedTools?.length || turn.analysis) ? (
-          <div className="space-y-2 rounded-[0.875rem] border border-border/60 bg-background/45 p-3">
-            {turn.usedTools && turn.usedTools.length > 0 ? (
-              <div>
-                <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                  <WandSparkles className="h-3.5 w-3.5" />
-                  Tools used in this answer
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {turn.usedTools.map((tool) => (
-                    <Badge key={tool} variant="outline">
-                      {tool.replaceAll("_", " ")}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {turn.analysis ? (
-              <>
-                <AnalysisSection title="RAG sources used">
-                  {turn.analysis.retrieval_mode ? (
-                    <div className="mb-2 text-xs text-muted-foreground">
-                      Retrieval mode: {turn.analysis.retrieval_mode}
-                    </div>
-                  ) : null}
-                  {turn.analysis.rag_sources.length > 0 ? (
-                    <div className="space-y-2">
-                      {turn.analysis.rag_sources.map((source) => (
-                        <div key={source.chunk_id} className="rounded-lg border border-border/60 bg-card/50 px-2.5 py-2 text-xs">
-                          <div className="font-medium">{source.document_title}</div>
-                          <div className="mt-0.5 text-muted-foreground">
-                            Source: {source.source ?? "knowledge"} · Chunk: {source.chunk_id} · Score: {source.score.toFixed(2)}
-                          </div>
-                          <div className="mt-1 text-muted-foreground">{source.snippet}</div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-xs text-muted-foreground">
-                      {turn.analysis.rag_status === "no_results"
-                        ? "RAG requested but no chunks matched this query."
-                        : turn.analysis.rag_status === "unavailable"
-                          ? "RAG unavailable. Qdrant or retrieval service is not connected."
-                          : turn.analysis.rag_status === "not_requested"
-                            ? "RAG was not requested for this answer."
-                            : "RAG status unavailable."}
-                    </div>
-                  )}
-                </AnalysisSection>
-                <AnalysisSection title="Provider mode">
-                  <div className="flex flex-wrap gap-1.5">
-                    {turn.analysis.provider_modes.map((mode) => (
-                      <Badge key={mode.name} variant="outline">
-                        {mode.name}: {mode.mode}
-                      </Badge>
-                    ))}
-                  </div>
-                </AnalysisSection>
-                <AnalysisSection title="Data used">
-                  {turn.analysis.data_used.length > 0 ? (
-                    <ul className="space-y-1 text-xs text-muted-foreground">
-                      {turn.analysis.data_used.map((item) => (
-                        <li key={item}>- {item}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="text-xs text-muted-foreground">No external datasets were required.</div>
-                  )}
-                </AnalysisSection>
-                <AnalysisSection title="Limitations">
-                  <ul className="space-y-1 text-xs text-muted-foreground">
-                    {turn.analysis.limitations.map((item) => (
-                      <li key={item}>- {item}</li>
-                    ))}
-                  </ul>
-                </AnalysisSection>
-              </>
-            ) : null}
-
-            {turn.citations && turn.citations.length > 0 ? (
-              <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                  Evidence
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {turn.citations.map((c) => (
-                    <Badge key={c.source_id} variant="muted" className="normal-case tracking-normal">
-                      {c.title}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+        {isAssistant && useInvestmentCard ? <div className="section-label">Executive answer</div> : null}
+        {isAssistant && useInvestmentCard ? (
+          <p className="whitespace-pre-wrap leading-relaxed text-foreground">{executiveText}</p>
+        ) : (
+          <p className="whitespace-pre-wrap leading-relaxed">{turn.message.content}</p>
+        )}
+        {isAssistant && useInvestmentCard && turn.investigationId ? (
+          <div className="rounded-[0.75rem] border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-900 dark:text-emerald-100">
+            Investigation saved.{" "}
+            <Link href="/investigations" className="underline">
+              View investigation
+            </Link>
           </div>
         ) : null}
 
-        {turn.decision && (
+        {isAssistant && useInvestmentCard && (needsMoreAnalysis || lowConfidence) ? (
+          <div className="rounded-[0.875rem] border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100">
+            <span className="font-semibold">More analysis required — </span>
+            {needsMoreAnalysis
+              ? "Evidence or confidence did not meet the bar for a firm recommendation."
+              : "Confidence is low; corroborate with additional data before acting."}
+          </div>
+        ) : null}
+
+        {isAssistant && useInvestmentCard && turn.analysis?.limitations && turn.analysis.limitations.length > 0 ? (
+          <div className="space-y-1 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground/80">Limitations: </span>
+            {turn.analysis.limitations.slice(0, 2).map((line) => (
+              <div key={line}>{line}</div>
+            ))}
+          </div>
+        ) : null}
+
+        {isAssistant && useInvestmentCard && turn.decision ? (
+          <div className="space-y-2">
+            <div className="section-label">Recommendation</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <RecommendationBadge recommendation={turn.decision.recommendation} />
+              <RiskBadge level={turn.decision.risk_level} />
+              <ConfidenceBadge value={turn.decision.confidence} />
+              <ApprovalModeBadge requiresApproval={turn.decision.requires_approval} />
+            </div>
+          </div>
+        ) : null}
+
+        {isAssistant && useInvestmentCard && turn.decision && turn.decision.reasoning.length > 0 ? (
+          <div>
+            <div className="section-label">Key reasoning</div>
+            <ul className="mt-2 space-y-1.5 text-xs text-muted-foreground">
+              {turn.decision.reasoning.map((line, idx) => (
+                <li key={idx} className="rounded-lg bg-background/40 px-2.5 py-2">
+                  {line}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {isAssistant && useInvestmentCard && turn.decision && turn.decision.evidence.length > 0 ? (
+          <div>
+            <div className="section-label">Key evidence</div>
+            <ul className="mt-2 space-y-1.5 text-xs">
+              {turn.decision.evidence.map((e, idx) => (
+                <li
+                  key={idx}
+                  className="flex items-start gap-2 rounded-lg bg-background/40 px-2.5 py-2 text-muted-foreground"
+                >
+                  <Badge variant="outline" className="shrink-0 font-mono normal-case tracking-normal">
+                    {e.tool}
+                  </Badge>
+                  <span className="min-w-0 flex-1">{e.summary}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {isAssistant && useInvestmentCard && turn.analysis && turn.analysis.rag_sources.length > 0 ? (
+          <details className="rounded-[0.875rem] border border-border/60 bg-background/45 px-3 py-2">
+            <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              RAG sources ({turn.analysis.rag_sources.length})
+            </summary>
+            <div className="mt-2 space-y-2">
+              {turn.analysis.retrieval_mode ? (
+                <div className="text-xs text-muted-foreground">Retrieval mode: {turn.analysis.retrieval_mode}</div>
+              ) : null}
+              {turn.analysis.rag_sources.map((source) => (
+                <div key={source.chunk_id} className="rounded-lg border border-border/60 bg-card/50 px-2.5 py-2 text-xs">
+                  <div className="font-medium text-foreground">{source.document_title}</div>
+                  <div className="mt-0.5 text-muted-foreground">
+                    {source.source ? `Path: ${source.source}` : "Knowledge base"} · Chunk {source.chunk_id} · Score{" "}
+                    {source.score.toFixed(2)}
+                  </div>
+                  <div className="mt-1 max-h-24 overflow-hidden text-ellipsis text-muted-foreground">{source.snippet}</div>
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
+
+        {isAssistant &&
+        useInvestmentCard &&
+        (turn.citations?.length || turn.usedTools?.length || turn.analysis) ? (
+          <details
+            className="rounded-[0.875rem] border border-border/50 bg-background/35 px-3 py-2"
+            open={technicalDetailsOpen}
+          >
+            <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Technical trace
+            </summary>
+            <div className="mt-3 space-y-3 text-xs">
+              {turn.usedTools && turn.usedTools.length > 0 ? (
+                <div>
+                  <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Tools used
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {turn.usedTools.map((tool) => (
+                      <Badge key={tool} variant="outline">
+                        {tool.replaceAll("_", " ")}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {turn.analysis && turn.analysis.rag_sources.length === 0 ? (
+                <div className="text-muted-foreground">
+                  RAG:{" "}
+                  {turn.analysis.rag_status === "no_results"
+                    ? "requested — no matching chunks."
+                    : turn.analysis.rag_status === "unavailable"
+                      ? "unavailable (Qdrant / retrieval)."
+                      : turn.analysis.rag_status === "not_requested"
+                        ? "not used."
+                        : "status unknown."}
+                </div>
+              ) : null}
+              {turn.analysis ? (
+                <>
+                  <AnalysisSection title="Provider mode">
+                    <div className="flex flex-wrap gap-1.5">
+                      {turn.analysis.provider_modes.map((mode) => (
+                        <Badge key={mode.name} variant="outline">
+                          {mode.name}: {mode.mode}
+                        </Badge>
+                      ))}
+                    </div>
+                  </AnalysisSection>
+                  <AnalysisSection title="Data used">
+                    {turn.analysis.data_used.length > 0 ? (
+                      <ul className="space-y-1 text-muted-foreground">
+                        {turn.analysis.data_used.map((item) => (
+                          <li key={item}>- {item}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="text-muted-foreground">No external datasets were required.</div>
+                    )}
+                  </AnalysisSection>
+                  {turn.analysis.limitations.length > 2 ? (
+                    <AnalysisSection title="Further limitations">
+                      <ul className="space-y-1 text-muted-foreground">
+                        {turn.analysis.limitations.slice(2).map((item) => (
+                          <li key={item}>- {item}</li>
+                        ))}
+                      </ul>
+                    </AnalysisSection>
+                  ) : null}
+                </>
+              ) : null}
+              {turn.citations && turn.citations.length > 0 ? (
+                <div>
+                  <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Citations
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {turn.citations.map((c) => (
+                      <Badge key={c.source_id} variant="muted" className="normal-case tracking-normal">
+                        {c.title}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {turn.routing?.suggested_tools && turn.routing.suggested_tools.length > 0 ? (
+                <div className="text-muted-foreground">
+                  Router suggested tools: {turn.routing.suggested_tools.join(", ")}
+                </div>
+              ) : null}
+              {turn.analysis?.orchestration_trace ? (
+                <div className="rounded-lg border border-border/60 bg-card/50 px-2.5 py-2 font-mono text-[11px] text-muted-foreground">
+                  <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Orchestration
+                  </div>
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all">
+                    {JSON.stringify(turn.analysis.orchestration_trace, null, 2)}
+                  </pre>
+                </div>
+              ) : null}
+            </div>
+          </details>
+        ) : null}
+
+        {useInvestmentCard && turn.decision ? (
           <DecisionCard
             decision={turn.decision}
             analysis={turn.analysis}
             conversationId={conversationId}
             responseId={turn.responseId ?? null}
+            variant="footer"
           />
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -1202,11 +1625,14 @@ function DecisionCard({
   analysis,
   conversationId,
   responseId,
+  variant = "full",
 }: {
   decision: AgentDecision;
   analysis?: ChatResponse["analysis"];
   conversationId: string | null;
   responseId: string | null;
+  /** When `footer`, badges and reasoning/evidence are shown above in the bubble. */
+  variant?: "full" | "footer";
 }) {
   const [feedback, setFeedback] = useState<FeedbackRating | null>(null);
   const [category, setCategory] = useState<FeedbackCategory>("usefulness");
@@ -1243,35 +1669,44 @@ function DecisionCard({
     setMemoSubmitting(true);
     setError(null);
     try {
-      const created = await api.createReport({
-        report_type: "investment_memo",
-        conversation_id: conversationId,
-        source_response_id: responseId,
-        ticker: inferTicker(decision),
-        prompt: `Generate memo for ${decision.recommendation} recommendation with ${decision.risk_level} risk and ${decision.confidence.toFixed(2)} confidence.`,
+      if (!analysis) {
+        setError("Memo generation failed: missing analysis context for this response.");
+        return;
+      }
+      const payload = buildInvestmentMemoReportPayload({
+        conversationId: conversationId,
+        responseId: responseId,
+        decision,
+        analysis,
       });
+      const created = await api.createReport(payload);
       setMemoCreatedId(created.id);
-    } catch {
-      setError("Could not generate memo from this response.");
+    } catch (error) {
+      setError(formatMemoReportError(error));
     } finally {
       setMemoSubmitting(false);
     }
   };
 
+  const showPrimary = variant === "full";
+
   return (
     <div className="rounded-[0.875rem] border border-border/70 bg-background/60 p-3 text-foreground">
-      <div className="flex flex-wrap items-center gap-2">
-        <RecommendationBadge recommendation={decision.recommendation} />
-        <RiskBadge level={decision.risk_level} />
-        <ConfidenceBadge value={decision.confidence} />
-        <ApprovalModeBadge requiresApproval={decision.requires_approval} />
-      </div>
+      {showPrimary ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <RecommendationBadge recommendation={decision.recommendation} />
+            <RiskBadge level={decision.risk_level} />
+            <ConfidenceBadge value={decision.confidence} />
+            <ApprovalModeBadge requiresApproval={decision.requires_approval} />
+          </div>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-3">
-        <MiniStat label="Approval" value={decision.approval_id ?? "none"} mono />
-        <MiniStat label="Evidence" value={String(decision.evidence.length)} />
-        <MiniStat label="Confidence" value={`${(decision.confidence * 100).toFixed(0)}%`} />
-      </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <MiniStat label="Evidence" value={String(decision.evidence.length)} />
+            <MiniStat label="Confidence" value={`${(decision.confidence * 100).toFixed(0)}%`} />
+          </div>
+        </>
+      ) : null}
       {decision.disclaimer && (
         <div className="mt-3 rounded-[0.75rem] border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100">
           {decision.disclaimer}
@@ -1292,58 +1727,31 @@ function DecisionCard({
         </div>
       )}
 
-      {decision.intent && (
+      {showPrimary && decision.intent ? (
         <div className="mt-3 rounded-[0.875rem] border border-border/60 bg-card/60 px-3 py-3 text-xs">
           <div className="section-label">Intent</div>
           <div className="mt-1 text-foreground">{decision.intent}</div>
         </div>
-      )}
-
-      {analysis?.orchestration_trace ? (
-        <div className="mt-3 rounded-[0.875rem] border border-border/60 bg-card/60 px-3 py-3 text-xs">
-          <div className="mb-2 flex items-center gap-2 section-label">
-            <Info className="h-3.5 w-3.5" />
-            How this answer was produced
-          </div>
-          <ul className="space-y-1 text-muted-foreground">
-            <li>1. Intent detected: {String(analysis.orchestration_trace.intent_detected ?? analysis.intent)}</li>
-            <li>
-              2. Tools selected:{" "}
-              {Array.isArray(analysis.orchestration_trace.tools_selected)
-                ? analysis.orchestration_trace.tools_selected.join(", ")
-                : analysis.tools_used.join(", ") || "none"}
-            </li>
-            <li>
-              3. Evidence gathered:{" "}
-              {Array.isArray(analysis.orchestration_trace.evidence_gathered)
-                ? analysis.orchestration_trace.evidence_gathered.join(", ")
-                : analysis.evidence_items.map((item) => item.title).join(", ") || "none"}
-            </li>
-            <li>4. RAG retrieval status: {String(analysis.orchestration_trace.rag_retrieval_status ?? analysis.rag_status ?? "unknown")}</li>
-            <li>5. Synthesis mode: {String(analysis.orchestration_trace.synthesis_mode ?? "deterministic_fallback")}</li>
-            <li>6. Approval gate result: {String(analysis.orchestration_trace.approval_gate_result ?? "n/a")}</li>
-          </ul>
-        </div>
       ) : null}
 
-      {decision.reasoning.length > 0 && (
+      {showPrimary && decision.reasoning.length > 0 ? (
         <div className="mt-3">
-          <div className="section-label">Reasoning</div>
+          <div className="section-label">Key reasoning</div>
           <ul className="mt-2 space-y-1.5 text-xs text-muted-foreground">
-            {decision.reasoning.map((line, idx) => (
+            {decision.reasoning.slice(0, 3).map((line, idx) => (
               <li key={idx} className="rounded-lg bg-background/40 px-2.5 py-2">
                 {line}
               </li>
             ))}
           </ul>
         </div>
-      )}
+      ) : null}
 
-      {decision.evidence.length > 0 && (
+      {showPrimary && decision.evidence.length > 0 ? (
         <div className="mt-3">
-          <div className="section-label">Evidence and tools</div>
+          <div className="section-label">Key evidence</div>
           <ul className="mt-2 space-y-1.5 text-xs">
-            {decision.evidence.map((e, idx) => (
+            {decision.evidence.slice(0, 4).map((e, idx) => (
               <li key={idx} className="flex items-start gap-2 rounded-lg bg-background/40 px-2.5 py-2 text-muted-foreground">
                 <Badge variant="outline" className="shrink-0 font-mono normal-case tracking-normal">
                   {e.tool}
@@ -1353,19 +1761,95 @@ function DecisionCard({
             ))}
           </ul>
         </div>
-      )}
+      ) : null}
 
-      {decision.approval_id && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          <span className="font-mono text-xs text-muted-foreground">
-            {decision.approval_id}
-          </span>
-          <Button asChild size="sm" variant="outline">
-            <Link href="/approvals">
-              View Approval
-              <ExternalLink className="h-3.5 w-3.5" />
-            </Link>
-          </Button>
+      {showPrimary ? (
+        <details className="mt-3 rounded-[0.875rem] border border-border/50 bg-background/35 px-3 py-2 text-xs">
+          <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            Decision technical details
+          </summary>
+          <div className="mt-3 space-y-3 text-muted-foreground">
+            {decision.approval_id ? (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-mono text-[11px] break-all">Approval ID: {decision.approval_id}</span>
+                <Button asChild size="sm" variant="outline">
+                  <Link href="/approvals">
+                    View approval
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </Link>
+                </Button>
+              </div>
+            ) : (
+              <div>Approval ID: none</div>
+            )}
+            {decision.reasoning.length > 3 ? (
+              <div>
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">Full reasoning</div>
+                <ul className="space-y-1.5">
+                  {decision.reasoning.slice(3).map((line, idx) => (
+                    <li key={idx} className="rounded-lg bg-background/40 px-2.5 py-2">
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {decision.evidence.length > 4 ? (
+              <div>
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">Further evidence</div>
+                <ul className="space-y-1.5">
+                  {decision.evidence.slice(4).map((e, idx) => (
+                    <li key={idx} className="flex items-start gap-2 rounded-lg bg-background/40 px-2.5 py-2">
+                      <Badge variant="outline" className="shrink-0 font-mono normal-case tracking-normal">
+                        {e.tool}
+                      </Badge>
+                      <span className="min-w-0 flex-1">{e.summary}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {analysis?.orchestration_trace ? (
+              <div className="rounded-lg border border-border/60 bg-card/50 px-2.5 py-2">
+                <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  <Info className="h-3.5 w-3.5" />
+                  How this answer was produced
+                </div>
+                <ul className="space-y-1">
+                  <li>1. Intent detected: {String(analysis.orchestration_trace.intent_detected ?? analysis.intent)}</li>
+                  <li>
+                    2. Tools selected:{" "}
+                    {Array.isArray(analysis.orchestration_trace.tools_selected)
+                      ? analysis.orchestration_trace.tools_selected.join(", ")
+                      : analysis.tools_used.join(", ") || "none"}
+                  </li>
+                  <li>
+                    3. Evidence gathered:{" "}
+                    {Array.isArray(analysis.orchestration_trace.evidence_gathered)
+                      ? analysis.orchestration_trace.evidence_gathered.join(", ")
+                      : analysis.evidence_items.map((item) => item.title).join(", ") || "none"}
+                  </li>
+                  <li>4. RAG retrieval status: {String(analysis.orchestration_trace.rag_retrieval_status ?? analysis.rag_status ?? "unknown")}</li>
+                  <li>5. Synthesis mode: {String(analysis.orchestration_trace.synthesis_mode ?? "deterministic_fallback")}</li>
+                  <li>6. Approval gate result: {String(analysis.orchestration_trace.approval_gate_result ?? "n/a")}</li>
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        </details>
+      ) : (
+        <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+          {decision.approval_id ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-[0.75rem] border border-border/60 bg-card/50 px-2.5 py-2">
+              <span className="font-mono text-[11px] break-all">Approval ID: {decision.approval_id}</span>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/approvals">
+                  View approval
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </Link>
+              </Button>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -1373,6 +1857,11 @@ function DecisionCard({
         <div className="mt-3 flex flex-col gap-3 rounded-[0.875rem] border border-border/60 bg-card/60 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs text-muted-foreground">
             Generate a structured memo from this decision context.
+            {decision.evidence.length === 0 ? (
+              <div className="mt-1 text-amber-600 dark:text-amber-300">
+                Memo will be limited because this answer has no structured evidence.
+              </div>
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
             {memoCreatedId && (
@@ -1473,19 +1962,4 @@ function MiniStat({
       </div>
     </div>
   );
-}
-
-function inferTicker(decision: AgentDecision): string | null {
-  for (const item of decision.evidence) {
-    const data = item.data;
-    if (typeof data !== "object" || data == null) continue;
-    const record = data as Record<string, unknown>;
-    const quotes = record.quotes;
-    if (!Array.isArray(quotes) || quotes.length === 0) continue;
-    const firstQuote = quotes[0];
-    if (typeof firstQuote !== "object" || firstQuote == null) continue;
-    const ticker = (firstQuote as Record<string, unknown>).ticker;
-    if (typeof ticker === "string" && ticker.trim()) return ticker;
-  }
-  return null;
 }

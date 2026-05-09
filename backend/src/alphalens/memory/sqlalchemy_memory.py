@@ -60,3 +60,24 @@ class SqlAlchemyMemoryStore(MemoryStore):
                 ConversationModel.conversation_id == conversation_id
             ).delete()
             session.commit()
+
+    def list_conversations(self, *, user_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        with self._session_factory() as session:
+            rows = (
+                session.query(ConversationModel)
+                .filter(ConversationModel.conversation_id.like(f"{user_id}:%"))
+                .order_by(ConversationModel.updated_at.desc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "conversation_id": row.conversation_id,
+                    "state": {
+                        "messages": list(row.messages),
+                        "metadata": list(row.metadata_json),
+                        "updated_at": row.updated_at.isoformat(),
+                    },
+                }
+                for row in rows
+            ]

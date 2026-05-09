@@ -83,11 +83,17 @@ class ToolRegistry:
                 if isinstance(result.data, dict)
                 else None
             )
+            metadata: dict[str, Any] = {"summary": result.summary[:120]}
+            if isinstance(result.data, dict):
+                if "fallback_used" in result.data:
+                    metadata["fallback_used"] = bool(result.data.get("fallback_used"))
+                if "provider_source" in result.data:
+                    metadata["provider_source"] = str(result.data.get("provider_source"))
             self._usage.record_tool_usage(
                 tool_name=name,
                 success=success,
                 provider=provider,
-                metadata={"summary": result.summary[:120]},
+                metadata=metadata,
             )
         except Exception:  # noqa: BLE001 - never let tracking break the agent
             pass

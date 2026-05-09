@@ -5,11 +5,13 @@ import { CheckCircle2, ClipboardCheck } from "lucide-react";
 
 import { ApprovalCard } from "@/components/cards/ApprovalCard";
 import { EmptyState } from "@/components/layout/EmptyState";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import { api, ApiError } from "@/lib/api";
 import type { Approval, ApprovalDecisionStatus } from "@/types/api";
 
 interface PendingApprovalsPanelProps {
   initialApprovals: Approval[];
+  unavailableReason?: string | null;
 }
 
 const DECISION_LABEL: Record<ApprovalDecisionStatus, string> = {
@@ -19,7 +21,10 @@ const DECISION_LABEL: Record<ApprovalDecisionStatus, string> = {
   cancelled: "Cancelled",
 };
 
-export function PendingApprovalsPanel({ initialApprovals }: PendingApprovalsPanelProps) {
+export function PendingApprovalsPanel({
+  initialApprovals,
+  unavailableReason = null,
+}: PendingApprovalsPanelProps) {
   const [approvals, setApprovals] = useState<Approval[]>(initialApprovals);
   const [flash, setFlash] = useState<string | null>(null);
   const [errorById, setErrorById] = useState<Record<string, string>>({});
@@ -87,17 +92,31 @@ export function PendingApprovalsPanel({ initialApprovals }: PendingApprovalsPane
   return (
     <div className="space-y-3">
       <h2 className="text-sm font-medium text-muted-foreground">Pending approvals</h2>
+      {unavailableReason ? (
+        <ErrorBanner
+          title="Pending approvals unavailable"
+          message={unavailableReason}
+          className="mb-2"
+        />
+      ) : null}
       {flash ? (
         <div className="flex items-center gap-2 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-sm text-success">
           <CheckCircle2 className="h-4 w-4" />
           {flash}
         </div>
       ) : null}
-      {visibleApprovals.length === 0 ? (
+      {unavailableReason ? (
+        <EmptyState
+          icon={ClipboardCheck}
+          title="Approval queue unavailable"
+          description="Unable to load persisted approvals. Restore backend connectivity, then refresh."
+          eyebrow="Review queue"
+        />
+      ) : visibleApprovals.length === 0 ? (
         <EmptyState
           icon={ClipboardCheck}
           title="No approvals pending"
-          description="Agent escalations will surface here when a human decision is required."
+          description="Generate an agent recommendation that requires human review to create one."
           eyebrow="Review queue"
         />
       ) : (

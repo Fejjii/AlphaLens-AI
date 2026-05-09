@@ -17,6 +17,7 @@ hints.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -28,6 +29,34 @@ from alphalens.tools.policy import POLICY
 from alphalens.tools.registry import ToolRegistry, ToolResult
 
 NodeFn = Callable[[AgentState], AgentState]
+
+_SCENARIO_SHOCK_DETECT_RE = re.compile(
+    r"(what\s+if|what\s+happens\s+if|stress\s+scenario|scenario\s+analysis|price\s+shock|\bshock\b|"
+    r"drops?\b|dropped\b|falls?\b|fell\b|declin(e|es|ed|ing)\b)",
+    re.IGNORECASE,
+)
+_SHOCK_PCT_RE = re.compile(
+    r"(?P<sign>-)?\s*(?P<num>\d+(?:\.\d+)?)\s*(?:%|percent)\b",
+    re.IGNORECASE,
+)
+_TICKER_RE_NODES = re.compile(r"\b[A-Z]{2,5}\b")
+_KNOWN_TICKERS_NODES: frozenset[str] = frozenset(
+    {
+        "NVDA",
+        "MSFT",
+        "AAPL",
+        "TSM",
+        "AVGO",
+        "GOOGL",
+        "AMZN",
+        "META",
+        "ASML",
+        "CRM",
+        "AMD",
+        "SPY",
+        "QQQ",
+    }
+)
 
 _MACRO_KEYWORDS = frozenset(
     {
@@ -106,6 +135,20 @@ def _last_user_message(state: AgentState) -> str:
     return ""
 
 
+def _is_scenario_shock_question(text: str) -> bool:
+    lowered = text.lower()
+    if not _SCENARIO_SHOCK_DETECT_RE.search(lowered):
+        return False
+    if _SHOCK_PCT_RE.search(text):
+        return True
+    if "portfolio" in lowered:
+        return True
+    for match in _TICKER_RE_NODES.findall(text):
+        if match in _KNOWN_TICKERS_NODES:
+            return True
+    return False
+
+
 def _conversation_text(state: AgentState, *, max_messages: int = 6) -> str:
     """Return a compact multi-turn context string for intent classification.
 
@@ -162,6 +205,17 @@ def make_interpret_node(llm: LLMService) -> NodeFn:
                 "used_tools": [],
                 "citations": [],
             }
+            if _is_scenario_shock_question(text):
+                output["intent"] = "scenario_simulation"
+                output["needs_portfolio"] = True
+                output["needs_market_data"] = False
+                output["needs_risk_check"] = False
+                if not output.get("tickers"):
+                    inferred = sorted(
+                        {m for m in _TICKER_RE_NODES.findall(text) if m in _KNOWN_TICKERS_NODES}
+                    )
+                    if inferred:
+                        output["tickers"] = inferred
         return output
 
     return interpret
@@ -405,6 +459,13 @@ def decide_node(state: AgentState) -> AgentState:
             risk_level = "low"
             confidence = 0.78 if intent == "portfolio_performance" else 0.7
             reasoning_extra.append("Performance request detected; prioritizing factual portfolio outcomes.")
+        elif intent == "scenario_simulation":
+            recommendation = "inform"
+            risk_level = "medium"
+            confidence = 0.72
+            reasoning_extra.append(
+                "Scenario shock question; first-order estimate from current weights (demo data)."
+            )
         elif intent in {"rag_policy_question", "market_news_question", "sec_filings_question", "macro_question", "general_question"}:
             recommendation = "inform"
             risk_level = "low"
@@ -422,15 +483,22 @@ def decide_node(state: AgentState) -> AgentState:
             reasoning_extra.append("One or more tools failed; downgrading confidence.")
 
         answer = _format_answer(intent, recommendation, reasoning_extra, state)
+        portfolio_impact_out: float | None = None
+        if intent == "scenario_simulation":
+            portfolio_impact_out = _scenario_portfolio_impact_fraction(state)
 
-    return {
+    out_state: AgentState = {
         "recommendation": recommendation,
         "requires_approval": requires_approval,
         "risk_level": risk_level,
         "confidence": confidence,
         "reasoning": [*state.get("reasoning", []), *reasoning_extra],
         "answer": answer,
+        "evidence": _expand_rag_evidence_for_response(state),
     }
+    if portfolio_impact_out is not None:
+        out_state["portfolio_impact"] = portfolio_impact_out
+    return out_state
 
 
 def _has_tool_failure(state: AgentState) -> bool:
@@ -449,12 +517,164 @@ def _evidence_data(state: AgentState, tool: str) -> dict | None:
     return None
 
 
+def _display_source_title(source: str) -> str:
+    """Human-readable document label for evidence rows (not for executive prose)."""
+
+    name = (source or "").strip() or "Internal document"
+    base = name.replace("\\", "/").rsplit("/", 1)[-1]
+    if base.lower().endswith(".md"):
+        base = base[:-3]
+    cleaned = base.replace("_", " ").strip()
+    return cleaned or "Internal document"
+
+
+def _compact_snippet(text: str, max_len: int = 120) -> str:
+    one_line = " ".join(str(text).split())
+    if len(one_line) <= max_len:
+        return one_line
+    return one_line[: max_len - 1].rstrip() + "…"
+
+
+def _expand_rag_evidence_for_response(state: AgentState) -> list[dict[str, Any]]:
+    """Split RAG tool output into per-source evidence rows; keep full chunk data off summaries."""
+
+    out: list[dict[str, Any]] = []
+    for ev in state.get("evidence", []):
+        if ev.get("tool") != "rag_retrieve":
+            out.append(ev)
+            continue
+        data = ev.get("data")
+        if not isinstance(data, dict):
+            out.append(ev)
+            continue
+        chunks = data.get("chunks")
+        if not isinstance(chunks, list) or not chunks:
+            out.append(ev)
+            continue
+        for c in chunks[:4]:
+            if not isinstance(c, dict):
+                continue
+            src = str(c.get("source", "document"))
+            title = _display_source_title(src)
+            snippet = _compact_snippet(str(c.get("text", "")), 140)
+            out.append(
+                {
+                    "tool": "rag_retrieve",
+                    "summary": f"{title}: {snippet}",
+                    "data": {
+                        "chunk_id": c.get("chunk_id"),
+                        "source": src,
+                        "score": c.get("score"),
+                        "text": c.get("text"),
+                    },
+                }
+            )
+    return out
+
+
+def _parse_shock_percent(text: str) -> float | None:
+    match = _SHOCK_PCT_RE.search(text)
+    if not match:
+        return None
+    val = float(match.group("num"))
+    if match.group("sign"):
+        val = -val
+    return val
+
+
+def _scenario_portfolio_impact_fraction(state: AgentState) -> float | None:
+    text = _last_user_message(state)
+    shock = _parse_shock_percent(text)
+    if shock is None:
+        return None
+    tickers = state.get("tickers") or []
+    ticker = str(tickers[0]).upper() if tickers else None
+    portfolio = _evidence_data(state, "portfolio_analyze") or {}
+    positions = portfolio.get("positions") if isinstance(portfolio, dict) else []
+    if not ticker or not isinstance(positions, list):
+        return None
+    for item in positions:
+        if isinstance(item, dict) and str(item.get("symbol", "")).upper() == ticker:
+            weight = item.get("weight")
+            if isinstance(weight, (int, float)):
+                return float(weight) * (shock / 100.0)
+    return None
+
+
+def _format_scenario_simulation_answer(state: AgentState, extras: list[str]) -> str:
+    text = _last_user_message(state)
+    shock = _parse_shock_percent(text)
+    tickers = state.get("tickers") or []
+    ticker = str(tickers[0]).upper() if tickers else None
+    if not ticker:
+        for match in _TICKER_RE_NODES.findall(text):
+            if match in _KNOWN_TICKERS_NODES:
+                ticker = match
+                break
+    portfolio = _evidence_data(state, "portfolio_analyze") or {}
+    positions = portfolio.get("positions") if isinstance(portfolio, dict) else []
+    weight: float | None = None
+    if ticker and isinstance(positions, list):
+        for item in positions:
+            if isinstance(item, dict) and str(item.get("symbol", "")).upper() == ticker:
+                w = item.get("weight")
+                if isinstance(w, (int, float)):
+                    weight = float(w)
+                break
+
+    lines = [
+        "Executive answer:",
+        "Scenario-style price shock (demo portfolio, first-order linear estimate).",
+        "",
+        "Estimated portfolio impact:",
+    ]
+    if shock is None:
+        lines.append(
+            "- Specify a percentage move (e.g. \"10%\" or \"10 percent\") to quantify the shock."
+        )
+    elif weight is not None:
+        approx_pct = weight * shock
+        lines.append(
+            f"- If {ticker} moves about {shock:+.1f}% and other positions are unchanged, "
+            f"portfolio return is roughly {approx_pct:+.2f}% from this name alone "
+            f"(weight ≈ {weight * 100:.2f}% × {shock:+.1f}% move)."
+        )
+    else:
+        lines.append(
+            f"- First-order estimate: portfolio return contribution ≈ (current {ticker} weight) × ({shock:+.1f}% move). "
+            "Holdings snapshot did not include this symbol’s weight; open Portfolio or Scenarios for a full run."
+        )
+
+    lines.extend(
+        [
+            "",
+            "Affected holding:",
+            f"- {ticker or 'Unknown (add a ticker such as NVDA)'}",
+            "",
+            "Risk level:",
+            "- Medium — scenario math is simplified and ignores correlations, beta, and derivatives.",
+            "",
+            "Recommendation / next step:",
+            "- Treat as indicative only; use the Scenarios page for a persisted simulation when available.",
+            "",
+            "Limitations:",
+            "- Synthetic holdings; linear approximation; not investment advice.",
+        ]
+    )
+    if extras:
+        lines.append("")
+        lines.append(f"Notes: {' '.join(extras)}")
+    return "\n".join(lines).strip()
+
+
 def _format_answer(
     intent: str,
     recommendation: str,
     extras: list[str],
     state: AgentState,
 ) -> str:
+    if intent == "scenario_simulation":
+        return _format_scenario_simulation_answer(state, extras)
     if intent == "portfolio_performance":
         return _format_performance_answer(state, extras)
     if intent == "portfolio_review":
@@ -541,23 +761,33 @@ def _format_policy_breach_answer(state: AgentState, extras: list[str]) -> str:
 def _format_rag_policy_answer(state: AgentState, extras: list[str]) -> str:
     rag_data = _evidence_data(state, "rag_retrieve") or {}
     chunks = rag_data.get("chunks") if isinstance(rag_data, dict) else []
-    lines = ["Policy summary from knowledge base:"]
-    if isinstance(chunks, list) and chunks:
-        for chunk in chunks[:4]:
-            if not isinstance(chunk, dict):
-                continue
-            source = str(chunk.get("source", "knowledge_base"))
-            text = str(chunk.get("text", "")).strip().replace("\n", " ")
-            snippet = text[:180] + ("..." if len(text) > 180 else "")
-            lines.append(f"- {source}: {snippet}")
-    else:
-        lines.append("- No policy chunks were retrieved for this question.")
-        lines.append(
-            f"- Structured fallback: single-name max {POLICY.single_name_max_weight * 100:.0f}%, trim threshold {POLICY.single_name_trim_threshold * 100:.0f}%."
+    trim_pct = POLICY.single_name_trim_threshold * 100
+    max_pct = POLICY.single_name_max_weight * 100
+    has_chunks = isinstance(chunks, list) and bool(chunks)
+    parts: list[str] = []
+    if has_chunks:
+        parts.append(
+            "Based on the internal policy documents indexed in the knowledge base, concentration should be judged against "
+            f"the single-name trim review level ({trim_pct:.0f}%) and the maximum position limit ({max_pct:.0f}%). "
+            "Exposure above the trim threshold is a candidate for reduction pending portfolio context; exposure above the "
+            "maximum typically requires escalation."
         )
+        parts.append(
+            "Internal policy evidence was retrieved from the knowledge base; document-level excerpts appear under Key evidence "
+            "and RAG sources."
+        )
+        parts.append(
+            "Any trim or trade decision should go through the human approval workflow before execution."
+        )
+    else:
+        parts.append(
+            "No policy passages were retrieved from the knowledge base for this question. "
+            f"As a structured fallback, the single-name maximum is near {max_pct:.0f}% and the trim review threshold is near {trim_pct:.0f}%."
+        )
+        parts.append("Confirm retrieval or rephrase the query to target the relevant policy sections.")
     if extras:
-        lines.append(f"- Notes: {' '.join(extras)}")
-    return "\n".join(lines)
+        parts.append(" ".join(extras))
+    return " ".join(parts).strip()
 
 
 def _format_investment_recommendation_answer(
@@ -566,38 +796,58 @@ def _format_investment_recommendation_answer(
     extras: list[str],
 ) -> str:
     tickers = state.get("tickers", []) or _default_tickers()
-    lines = [f"Investment recommendation: {recommendation}."]
-    lines.append(f"- Evaluated symbols: {', '.join(tickers)}")
+    tickers_str = ", ".join(tickers[:5])
     portfolio = _evidence_data(state, "portfolio_analyze") or {}
     positions = portfolio.get("positions") if isinstance(portfolio, dict) else []
-    nvda_position = None
-    if isinstance(positions, list):
-        for item in positions:
-            if isinstance(item, dict) and str(item.get("symbol", "")).upper() == "NVDA":
-                nvda_position = item
-                break
-    if isinstance(nvda_position, dict):
-        weight = nvda_position.get("weight")
-        if isinstance(weight, (int, float)):
-            lines.append(f"- NVDA current weight: {float(weight) * 100:.2f}%")
-    lines.append(f"- Policy trim threshold: {POLICY.single_name_trim_threshold * 100:.2f}%")
     rag_data = _evidence_data(state, "rag_retrieve") or {}
     chunks = rag_data.get("chunks") if isinstance(rag_data, dict) else []
-    if isinstance(chunks, list) and chunks:
-        lines.append("- Internal policy context was included from the knowledge base.")
-        for chunk in chunks[:3]:
-            if not isinstance(chunk, dict):
-                continue
-            source = str(chunk.get("source", "knowledge_base"))
-            snippet = str(chunk.get("text", "")).replace("\n", " ").strip()[:140]
-            lines.append(f"- Evidence: {source} -> {snippet}")
+    has_rag = isinstance(chunks, list) and bool(chunks)
+    trim_pct = POLICY.single_name_trim_threshold * 100
+    max_pct = POLICY.single_name_max_weight * 100
+
+    if recommendation == "trim":
+        lead = (
+            "Based on the portfolio snapshot and IPS-style limits, the highlighted position(s) warrant a trim review: "
+            f"exposure above the {trim_pct:.0f}% trim threshold should be reduced subject to committee approval, and the "
+            f"{max_pct:.0f}% level is treated as a hard maximum requiring escalation if breached."
+        )
+    elif recommendation == "escalate":
+        lead = (
+            "Policy limits appear breached in the current snapshot; escalate for committee review before any trade action "
+            f"and realign to the {max_pct:.0f}% single-name ceiling and {trim_pct:.0f}% trim review guidance."
+        )
     else:
-        lines.append("- Internal policy context not retrieved; recommendation is based on non-RAG evidence.")
-    lines.append("- Approval requirement: committee approval is required before execution actions.")
-    lines.append("- Limitations: this recommendation is based on synthetic/demo holdings unless live providers are configured.")
+        lead = (
+            f"This recommendation ({recommendation}) was evaluated for {tickers_str} against trim ({trim_pct:.0f}%) and "
+            f"maximum ({max_pct:.0f}%) single-name guidance in the demo policy set."
+        )
+
+    weight_sentence = ""
+    focus = str(tickers[0]).upper() if tickers else ""
+    if focus and isinstance(positions, list):
+        for item in positions:
+            if isinstance(item, dict) and str(item.get("symbol", "")).upper() == focus:
+                w = item.get("weight")
+                if isinstance(w, (int, float)):
+                    weight_sentence = (
+                        f" In the synthetic snapshot, {focus} is about {float(w) * 100:.2f}% of the portfolio—compare that weight "
+                        "to the trim and maximum thresholds when deciding next steps."
+                    )
+                break
+
+    rag_sentence = (
+        " Internal policy evidence was retrieved from the knowledge base; supporting excerpts are under Key evidence and RAG sources."
+        if has_rag
+        else " No knowledge-base passages were retrieved on this turn; lean on structured thresholds and portfolio analytics, or retry retrieval."
+    )
+    approval_sentence = " Any execution action requires human approval in the workflow."
+    limit_sentence = (
+        " Limitations: holdings and indexed documents are synthetic or demo unless production providers and corpora are configured."
+    )
+    body = "".join([lead, weight_sentence, rag_sentence, approval_sentence, limit_sentence])
     if extras:
-        lines.append(f"- Risk notes: {' '.join(extras)}")
-    return "\n".join(lines)
+        body = f"{body} {' '.join(extras)}"
+    return body.strip()
 
 
 def _format_generic_evidence_answer(

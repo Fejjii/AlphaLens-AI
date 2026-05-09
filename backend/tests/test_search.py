@@ -131,11 +131,11 @@ def test_no_api_key_uses_fallback_client() -> None:
     assert service.using_external is False
 
 
-def test_provider_set_to_fallback_uses_fallback_even_with_api_key() -> None:
-    settings = Settings(search_provider="fallback", serper_api_key="key-abc")
+def test_api_key_enables_serper_even_when_provider_left_on_fallback() -> None:
+    settings = Settings(SEARCH_PROVIDER="fallback", SERPER_API_KEY="key-abc")
 
-    assert get_search_client(settings) is None
-    assert get_search_service(settings).using_external is False
+    assert isinstance(get_search_client(settings), SerperSearchClient)
+    assert get_search_service(settings).using_external is True
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +251,8 @@ def test_service_falls_back_cleanly_on_provider_error() -> None:
     # Fallback ran, so provider tag must be 'fallback' and we still got results.
     assert response.provider == "fallback"
     assert len(response.results) == 3
+    assert response.fallback_used is True
+    assert response.provider_source == "fallback_on_error"
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +268,8 @@ def test_web_search_tool_returns_provider_and_results() -> None:
 
     assert result.name == "web_search"
     assert result.data["provider"] == "fallback"
+    assert result.data["fallback_used"] is True
+    assert result.data["provider_source"] == "fallback_default"
     assert result.data["query"] == "AAPL earnings"
     assert len(result.data["results"]) == 3
     for hit in result.data["results"]:
@@ -273,6 +277,24 @@ def test_web_search_tool_returns_provider_and_results() -> None:
         assert hit["title"]
         assert hit["url"].startswith("http")
         assert hit["source"]
+
+
+def test_service_primary_sets_usage_metadata_without_fallback() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_serper_payload(count=1))
+
+    service = SearchService(
+        primary=SerperSearchClient(
+            api_key="test-key",
+            client=httpx.Client(transport=_mock_transport(handler)),
+        ),
+        fallback=FallbackSearchClient(),
+    )
+
+    response = service.search("nvidia", k=1)
+    assert response.provider == "serper"
+    assert response.fallback_used is False
+    assert response.provider_source == "primary"
 
 
 # ---------------------------------------------------------------------------

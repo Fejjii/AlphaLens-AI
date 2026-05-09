@@ -124,13 +124,40 @@ class ChatRequest(APIModel):
     messages: list[ChatMessage] = Field(..., min_length=1)
 
 
+class ChatAnswerType(str, Enum):
+    """How the frontend should render this assistant turn."""
+
+    INVESTMENT_DECISION = "investment_decision"
+    APP_HELP = "app_help"
+    OUT_OF_SCOPE = "out_of_scope"
+    CLARIFICATION = "clarification"
+
+
+class ChatRouting(APIModel):
+    """Structured domain routing metadata for every chat response."""
+
+    answer_type: str
+    intent: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    language: str
+    reason: str = Field(default="", max_length=720)
+    suggested_tools: list[str] = Field(default_factory=list)
+    router_source: str | None = Field(
+        default=None,
+        description="deterministic_guard | llm | llm_low_confidence | deterministic_fallback",
+    )
+
+
 class ChatResponse(APIModel):
     conversation_id: str
     response_id: str
     message: ChatMessage
+    answer_type: ChatAnswerType = ChatAnswerType.INVESTMENT_DECISION
+    routing: ChatRouting
     detected_language: str | None = None
     response_language: str | None = None
     citations: list[Citation] = Field(default_factory=list)
     used_tools: list[str] = Field(default_factory=list)
     decision: AgentDecision | None = None
     analysis: ChatAnalysis
+    investigation_id: str | None = None

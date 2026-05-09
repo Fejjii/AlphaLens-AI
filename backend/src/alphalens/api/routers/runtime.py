@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from alphalens.api.deps import SettingsDep, get_persistence_runtime_state
 from alphalens.schemas.runtime import ProviderStatus, RuntimeStatusResponse
+from alphalens.services.search_service import resolve_search_provider
 
 router = APIRouter(prefix="/runtime", tags=["runtime"])
 
@@ -15,6 +16,7 @@ def runtime_status(
     settings: SettingsDep,
 ) -> RuntimeStatusResponse:
     persistence = get_persistence_runtime_state()
+    effective_search_provider, search_external_enabled = resolve_search_provider(settings)
     providers = [
         ProviderStatus(
             name="OpenAI LLM",
@@ -46,9 +48,9 @@ def runtime_status(
         ),
         ProviderStatus(
             name="Web/News",
-            status="real" if settings.search_provider == "serper" and bool(settings.serper_api_key) else "fallback",
+            status="real" if search_external_enabled else "fallback",
             reason=None
-            if settings.search_provider == "serper" and settings.serper_api_key
+            if search_external_enabled
             else "SERPER_API_KEY not configured",
         ),
         ProviderStatus(
@@ -88,8 +90,13 @@ def runtime_status(
             ),
         ),
     ]
+    live_provider_present = any(
+        provider.status in {"real", "connected"}
+        for provider in providers
+        if provider.name in {"OpenAI LLM", "Speech", "Market Data", "Web/News", "Macro", "SEC"}
+    )
     return RuntimeStatusResponse(
-        workspace_mode="demo",
+        workspace_mode="live" if live_provider_present else "demo",
         providers=providers,
         data_sources={
             "portfolio": "synthetic",
@@ -98,10 +105,10 @@ def runtime_status(
             "refresh_tokens": persistence.refresh_tokens,
             "approvals": persistence.approvals,
             "reports": persistence.reports,
+            "investigations": persistence.investigations,
             "feedback": persistence.feedback,
             "usage": persistence.usage,
-            "external_market": "fallback"
-            if providers[2].status == "fallback"
-            else "alpha_vantage",
+            "external_market": "fallback" if providers[2].status == "fallback" else "alpha_vantage",
+            "external_web_news": effective_search_provider,
         },
     )

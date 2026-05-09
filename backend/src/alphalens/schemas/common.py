@@ -34,3 +34,4 @@ class ErrorResponse(APIModel):
     code: str
     message: str
     details: Any | None = None
+    request_id: str | None = None

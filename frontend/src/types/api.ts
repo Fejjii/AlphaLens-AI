@@ -105,6 +105,7 @@ export type ChatRole = "user" | "assistant" | "system" | "tool";
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface Citation {
@@ -158,10 +159,28 @@ export interface ChatRequest {
   messages: ChatMessage[];
 }
 
+export type ChatAnswerType =
+  | "investment_decision"
+  | "app_help"
+  | "out_of_scope"
+  | "clarification";
+
+export interface ChatRouting {
+  answer_type: string;
+  intent: string;
+  confidence: number;
+  language: string;
+  reason: string;
+  suggested_tools: string[];
+  router_source?: string | null;
+}
+
 export interface ChatResponse {
   conversation_id: string;
   response_id: string;
   message: ChatMessage;
+  answer_type: ChatAnswerType;
+  routing: ChatRouting;
   response_language?: string | null;
   citations: Citation[];
   used_tools: string[];
@@ -187,6 +206,60 @@ export interface ChatResponse {
     disclaimer?: string | null;
     orchestration_trace: Record<string, unknown>;
   };
+  investigation_id?: string | null;
+}
+
+/** Analysis payload from agent chat; alias for memo/report builders. */
+export type ChatAnalysis = ChatResponse["analysis"];
+
+export type InvestigationStatus =
+  | "open"
+  | "completed"
+  | "needs_more_analysis"
+  | "approved"
+  | "rejected";
+
+export interface Investigation {
+  id: string;
+  user_id: string;
+  conversation_id: string;
+  source_response_id: string;
+  title: string;
+  status: InvestigationStatus;
+  intent: string;
+  subject?: string | null;
+  created_at: string;
+  updated_at: string;
+  summary: string;
+  recommendation: Recommendation;
+  risk_level?: string | null;
+  confidence?: number | null;
+  tools_used: string[];
+  evidence_items: Array<{ title: string; detail: string; source_type: string }>;
+  rag_sources: RAGSource[];
+  provider_modes: ProviderMode[];
+  data_used: string[];
+  orchestration_trace: Record<string, unknown>;
+  approval_id?: string | null;
+  report_id?: string | null;
+  limitations: string[];
+}
+
+export interface ConversationSummary {
+  conversation_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface ConversationDetail {
+  conversation_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  messages: ChatMessage[];
+  metadata: Record<string, unknown>[];
 }
 
 export type SpeechProviderMode = "real" | "fallback";
@@ -404,6 +477,51 @@ export interface ReportSection {
   bullets: string[];
 }
 
+export interface ReportDecisionContext {
+  action?: string | null;
+  recommendation?: Recommendation | string | null;
+  risk_level?: RiskLevel | string | null;
+  confidence?: number | null;
+  approval_required?: boolean | null;
+  approval_id?: string | null;
+  approval_required_reason?: string | null;
+  key_reasoning: string[];
+  key_evidence: EvidenceItem[];
+  policy_flags: string[];
+}
+
+export interface ReportAnalysisContext {
+  intent?: string | null;
+  tools_used: string[];
+  rag_sources: RAGSource[];
+  provider_modes: ProviderMode[];
+  data_used: string[];
+  limitations: string[];
+  orchestration_trace: Record<string, unknown>;
+  portfolio_snapshot_used?: string | null;
+  policy_rules_used: string[];
+}
+
+export interface ReportMemoContext {
+  user_prompt?: string | null;
+  agent_final_answer?: string | null;
+  answer_type?: ChatAnswerType | string | null;
+  decision?: ReportDecisionContext | null;
+  analysis?: ReportAnalysisContext | null;
+  ticker_or_subject?: string | null;
+}
+
+export interface ReportGenerationMeta {
+  limited_context: boolean;
+  rag_sources_count: number;
+  tools_used: string[];
+  fallback_used: boolean;
+  generated_sections: string[];
+  approval_id?: string | null;
+  /** True when ``source_response_id`` was not found in server memory but memo still used client context. */
+  source_lookup_failed?: boolean;
+}
+
 export interface ReportCreate {
   title?: string | null;
   report_type: ReportType;
@@ -411,6 +529,7 @@ export interface ReportCreate {
   conversation_id?: string | null;
   source_response_id?: string | null;
   ticker?: string | null;
+  memo_context?: ReportMemoContext | null;
 }
 
 export interface ReportResponse {
@@ -430,6 +549,7 @@ export interface ReportResponse {
   evidence_count?: number;
   policy_flags?: string[];
   approval_required_reason?: string | null;
+  memo_metadata: ReportGenerationMeta;
   created_at: string;
   updated_at: string;
 }

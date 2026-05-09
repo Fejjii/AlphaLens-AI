@@ -44,23 +44,33 @@ class UpstreamError(AppError):
     code = "upstream_error"
 
 
-def _error_response(status_code: int, code: str, message: str, details: object | None = None) -> JSONResponse:
-    payload = ErrorResponse(code=code, message=message, details=details)
-    return JSONResponse(status_code=status_code, content=payload.model_dump())
+def _error_response(
+    status_code: int,
+    code: str,
+    message: str,
+    details: object | None = None,
+    *,
+    request_id: str | None = None,
+) -> JSONResponse:
+    payload = ErrorResponse(code=code, message=message, details=details, request_id=request_id)
+    return JSONResponse(status_code=status_code, content=payload.model_dump(exclude_none=True))
 
 
-async def _app_error_handler(_: Request, exc: AppError) -> JSONResponse:
-    log.warning("app_error", code=exc.code, message=exc.message)
-    return _error_response(exc.status_code, exc.code, exc.message, details=exc.details)
+async def _app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    rid = request.headers.get("x-request-id")
+    log.warning("app_error", code=exc.code, message=exc.message, request_id=rid)
+    return _error_response(exc.status_code, exc.code, exc.message, details=exc.details, request_id=rid)
 
 
-async def _validation_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
-    log.info("validation_error", errors=exc.errors())
+async def _validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    rid = request.headers.get("x-request-id")
+    log.info("validation_error", errors=exc.errors(), request_id=rid)
     return _error_response(
         status.HTTP_422_UNPROCESSABLE_ENTITY,
         "validation_failed",
         "Request validation failed.",
         details=exc.errors(),
+        request_id=rid,
     )
 
 
@@ -85,12 +95,14 @@ async def _plan_access_handler(_: Request, exc: PlanAccessError) -> JSONResponse
     return JSONResponse(status_code=status.HTTP_429_TOO_MANY_REQUESTS, content={"detail": detail})
 
 
-async def _unhandled_handler(_: Request, exc: Exception) -> JSONResponse:
-    log.exception("unhandled_error", error=str(exc))
+async def _unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
+    rid = request.headers.get("x-request-id")
+    log.exception("unhandled_error", error=str(exc), request_id=rid)
     return _error_response(
         status.HTTP_500_INTERNAL_SERVER_ERROR,
         "internal_error",
         "An unexpected error occurred.",
+        request_id=rid,
     )
 
 

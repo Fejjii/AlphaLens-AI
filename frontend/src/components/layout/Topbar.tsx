@@ -44,7 +44,7 @@ export function Topbar() {
       api.runtimeStatus(),
       api.fetchMyPlanUsage(),
       api.fetchUsageEvents(),
-      api.fetchApprovals(),
+      api.listApprovals().catch(() => []),
     ])
       .then(([runtimeStatus, usage, usageEvents, approvals]) => {
         setRuntime(runtimeStatus);
@@ -67,6 +67,14 @@ export function Topbar() {
     () => runtime?.providers.find((provider) => provider.name === "Persistence") ?? null,
     [runtime],
   );
+  const hasRuntimeFallback = useMemo(() => {
+    if (!runtime) return false;
+    return runtime.providers.some((provider) =>
+      ["OpenAI LLM", "Speech", "Market Data", "Web/News", "Macro", "SEC"].includes(provider.name)
+      && provider.status === "fallback");
+  }, [runtime]);
+  const workspaceModeLabel = runtime?.workspace_mode === "live" ? "live mode" : "demo mode";
+  const runtimeModeLabel = hasRuntimeFallback ? "deterministic fallback" : "live providers";
   const searchResults = useMemo<SearchResultItem[]>(() => buildSearchResults(searchQuery), [searchQuery]);
 
   const initials =
@@ -193,7 +201,9 @@ export function Topbar() {
           aria-expanded={activeTopbarPanel === "demo"}
           aria-controls="topbar-panel-demo"
         >
-          <Badge variant="outline" className="font-mono">demo mode</Badge>
+          <Badge variant={runtime?.workspace_mode === "live" ? "success" : "outline"} className="font-mono">
+            {workspaceModeLabel}
+          </Badge>
         </button>
         <button
           type="button"
@@ -202,7 +212,9 @@ export function Topbar() {
           aria-expanded={activeTopbarPanel === "runtime"}
           aria-controls="topbar-panel-runtime"
         >
-          <Badge variant="muted" className="font-mono">deterministic fallback</Badge>
+          <Badge variant={hasRuntimeFallback ? "muted" : "success"} className="font-mono">
+            {runtimeModeLabel}
+          </Badge>
         </button>
         {user && (
           <button

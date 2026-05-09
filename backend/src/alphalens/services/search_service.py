@@ -64,9 +64,15 @@ class SearchService:
 
     def _do_search(self, query: str, k: int) -> SearchResponse:
         if self._primary is None:
-            return self._fallback.search(query, k=k)
+            response = self._fallback.search(query, k=k)
+            return response.model_copy(
+                update={"fallback_used": True, "provider_source": "fallback_default"}
+            )
         try:
-            return self._primary.search(query, k=k)
+            response = self._primary.search(query, k=k)
+            return response.model_copy(
+                update={"fallback_used": False, "provider_source": "primary"}
+            )
         except SearchError as exc:
             logger.warning(
                 "search_fallback",
@@ -74,7 +80,10 @@ class SearchService:
                 error=str(exc),
                 reason="primary_error",
             )
-            return self._fallback.search(query, k=k)
+            response = self._fallback.search(query, k=k)
+            return response.model_copy(
+                update={"fallback_used": True, "provider_source": "fallback_on_error"}
+            )
 
     def _cache_key(self, query: str, k: int) -> str:
         return build_cache_key(_NAMESPACE, {"q": query.strip().lower(), "k": k})
@@ -100,10 +109,21 @@ class SearchService:
         self._cache.set_cached(key, response.model_dump(mode="json"))
 
 
+def resolve_search_provider(settings: Settings) -> tuple[str, bool]:
+    """Return effective search provider and whether external is enabled.
+
+    The runtime auto-enables Serper when an API key is present, even if
+    SEARCH_PROVIDER is left at its historical fallback default.
+    """
+    if settings.serper_api_key:
+        return ("serper", True)
+    return ("fallback", False)
+
+
 def get_search_client(settings: Settings) -> SearchClient | None:
     """Build the primary client, or None when external provider is disabled."""
-
-    if settings.search_provider == "serper" and settings.serper_api_key:
+    provider, using_external = resolve_search_provider(settings)
+    if provider == "serper" and using_external:
         try:
             return SerperSearchClient(
                 api_key=settings.serper_api_key,

@@ -10,9 +10,24 @@ _ARABIC_RE = re.compile(r"[\u0600-\u06FF]")
 
 
 def detect_language(text: str) -> str | None:
-    lowered = f" {text.lower()} "
+    lowered_raw = text.lower()
+    lowered = f" {lowered_raw} "
     if _ARABIC_RE.search(text):
         return "ar"
+    if any(
+        frag in lowered_raw
+        for frag in (
+            "français",
+            "francais",
+            "comprends",
+            "comprenez",
+            "est-ce que",
+            "est ce que",
+            "peux-tu",
+            "pouvez-vous",
+        )
+    ):
+        return "fr"
     if sum(keyword in lowered for keyword in _GERMAN_KEYWORDS) >= 2:
         return "de"
     if sum(keyword in lowered for keyword in _FRENCH_KEYWORDS) >= 2:

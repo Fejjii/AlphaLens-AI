@@ -30,3 +30,5 @@ class SearchResponse(APIModel):
     query: str = Field(..., min_length=1, max_length=512)
     results: list[SearchResult] = Field(default_factory=list)
     provider: str = Field(..., min_length=1, max_length=64)
+    fallback_used: bool = False
+    provider_source: str = Field(default="primary", min_length=1, max_length=64)

@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     openai_temperature: float = Field(default=0.2, ge=0.0, le=2.0, alias="OPENAI_TEMPERATURE")
     openai_top_p: float = Field(default=1.0, ge=0.0, le=1.0, alias="OPENAI_TOP_P")
     llm_enabled: bool = Field(default=True, alias="LLM_ENABLED")
+    chat_router_confidence_threshold: float = Field(
+        default=0.62,
+        ge=0.0,
+        le=1.0,
+        alias="CHAT_ROUTER_CONFIDENCE_THRESHOLD",
+        description="Minimum LLM router confidence before accepting classification.",
+    )
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
     speech_enabled: bool = Field(default=True, alias="SPEECH_ENABLED")
     default_response_language: str = Field(
@@ -101,7 +108,7 @@ class Settings(BaseSettings):
 
     serper_api_key: str | None = Field(default=None, alias="SERPER_API_KEY")
     search_provider: SearchProvider = Field(
-        default="fallback", alias="SEARCH_PROVIDER"
+        default="serper", alias="SEARCH_PROVIDER"
     )
     search_timeout_seconds: float = Field(
         default=10.0, gt=0, le=60, alias="SEARCH_TIMEOUT_SECONDS"

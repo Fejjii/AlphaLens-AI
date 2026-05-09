@@ -47,5 +47,31 @@ class InMemoryMemoryStore(MemoryStore):
         with self._lock:
             self._store.pop(conversation_id, None)
 
+    def list_conversations(self, *, user_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        prefix = f"{user_id}:"
+        with self._lock:
+            now = time.monotonic()
+            rows: list[dict[str, Any]] = []
+            expired_keys: list[str] = []
+            for key, (state, expires_at) in self._store.items():
+                if now >= expires_at:
+                    expired_keys.append(key)
+                    continue
+                if not key.startswith(prefix):
+                    continue
+                rows.append(
+                    {
+                        "conversation_id": key,
+                        "state": copy.deepcopy(state),
+                    }
+                )
+            for key in expired_keys:
+                self._store.pop(key, None)
+        rows.sort(
+            key=lambda item: str(item["state"].get("updated_at") or ""),
+            reverse=True,
+        )
+        return rows[:limit]
+
     def _expires_at(self) -> float:
         return time.monotonic() + self._ttl_seconds

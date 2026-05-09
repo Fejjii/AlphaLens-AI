@@ -8,6 +8,7 @@ the responder applies deterministic rules.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,10 +21,12 @@ from alphalens.services.language_service import get_response_language
 from alphalens.schemas.agent import (
     AgentDecision,
     ChatAnalysis,
+    ChatAnswerType,
     ChatMessage,
     ChatRequest,
     ChatResponse,
     ChatRole,
+    ChatRouting,
     Citation,
     EvidenceItem,
     EvidenceSource,
@@ -42,6 +45,7 @@ from alphalens.services.market_data_service import (
 )
 from alphalens.services.rag_service import RAGService
 from alphalens.services.search_service import SearchService, get_search_service
+from alphalens.services.search_service import resolve_search_provider
 from alphalens.services.sec_service import SECService, get_sec_service
 from alphalens.services.usage_service import UsageService
 from alphalens.tools.macro_tool import make_macro_snapshot_tool
@@ -52,7 +56,15 @@ from alphalens.tools.registry import ToolRegistry
 from alphalens.tools.risk_tool import make_risk_tool
 from alphalens.tools.sec_tool import make_sec_filings_tool
 from alphalens.tools.web_search_tool import make_web_search_tool
+from alphalens.schemas.llm import RouteClassification
 from alphalens.schemas.user import UserProfile
+from alphalens.services.chat_domain_router import (
+    clarification_reply,
+    resolve_chat_route,
+)
+from alphalens.services.app_help_replies import compose_app_help_reply
+from alphalens.services.domain_gate import out_of_scope_reply
+from alphalens.services.investigations_service import InvestigationsService
 
 log = get_logger(__name__)
 
@@ -123,11 +135,13 @@ class ChatService:
         sec_service: SECService | None = None,
         usage_service: UsageService | None = None,
         memory_service: MemoryService | None = None,
+        investigations_service: InvestigationsService | None = None,
     ) -> None:
         self._settings = settings
         self._approvals_service = approvals_service
         self._usage_service = usage_service
         self._memory_service = memory_service
+        self._investigations_service = investigations_service
         self._registry = registry or build_default_registry(
             settings=settings,
             rag_service=rag_service,
@@ -176,6 +190,62 @@ class ChatService:
         prior_messages = list(history.get("messages", []))
         merged_messages = [*prior_messages, *request_messages]
 
+        def _llm_route(msg: str) -> RouteClassification:
+            return self._llm_service.classify_route(
+                message=msg, conversation_id=conversation_id
+            )
+
+        route = resolve_chat_route(
+            latest_user_text,
+            prior_messages=prior_messages,
+            detected_language=detected_language or "en",
+            confidence_threshold=self._settings.chat_router_confidence_threshold,
+            llm_classify=_llm_route if self._llm_service.using_llm else None,
+        )
+        if route.answer_type != ChatAnswerType.INVESTMENT_DECISION.value:
+            gated = _build_gated_response(
+                conversation_id=conversation_id,
+                latest_user_text=latest_user_text,
+                routing=route,
+                response_language=response_language,
+                detected_language=detected_language,
+            )
+            gated = _enforce_chat_response_contract(gated)
+            stub_state: AgentState = {
+                "conversation_id": conversation_id,
+                "messages": merged_messages,
+                "used_tools": [],
+                "rag_requested": False,
+                "needs_rag": False,
+            }
+            self._save_turn(
+                conversation_id,
+                user_id=user.id,
+                request_messages=request_messages,
+                response=gated,
+                final_state=stub_state,
+            )
+            self._log_debug_trace(
+                request_id=request_id,
+                conversation_id=conversation_id,
+                endpoint=endpoint,
+                user_id=user.id,
+                latest_user_text=latest_user_text,
+                final_state=stub_state,
+                response=gated,
+            )
+            _log_route_trace(
+                settings=self._settings,
+                request_id=request_id,
+                conversation_id=conversation_id,
+                latest_user_text=latest_user_text,
+                prior_messages=prior_messages,
+                route=route,
+                langgraph_invoked=False,
+                response=gated,
+            )
+            return gated
+
         initial_state: AgentState = {
             "conversation_id": conversation_id,
             "messages": merged_messages,
@@ -185,16 +255,60 @@ class ChatService:
             "response_language": response_language,
         }
 
+        if self._settings.is_dev:
+            log.info(
+                "chat_langgraph_invoke",
+                request_id=request_id or "n/a",
+                conversation_id=conversation_id,
+                user_id=user.id,
+                domain_route_answer_type=route.answer_type,
+                domain_route_intent=route.intent,
+                domain_route_suggested_tools=list(route.suggested_tools),
+            )
         final_state: AgentState = self._graph.invoke(
             initial_state,
             config={"configurable": {"thread_id": conversation_id}},
         )
-        response = _to_response(
-            conversation_id,
-            final_state,
-            approvals_service=self._approvals_service,
-            user_id=user.id,
+        if self._settings.is_dev:
+            log.info(
+                "chat_langgraph_complete",
+                request_id=request_id or "n/a",
+                conversation_id=conversation_id,
+                user_id=user.id,
+                graph_intent=final_state.get("intent"),
+                graph_used_tools=list(final_state.get("used_tools", [])),
+                evidence_count=len(final_state.get("evidence", [])),
+            )
+        response = _enforce_chat_response_contract(
+            _to_response(
+                conversation_id,
+                final_state,
+                domain_route=route,
+                approvals_service=self._approvals_service,
+                user_id=user.id,
+            )
         )
+        investigation = None
+        if self._investigations_service is not None:
+            try:
+                investigation = self._investigations_service.create_from_chat_response(
+                    user_id=user.id,
+                    user_prompt=latest_user_text,
+                    response=response,
+                )
+            except Exception as exc:
+                if self._settings.is_dev:
+                    log.warning(
+                        "chat_investigation_create_failed",
+                        request_id=request_id or "n/a",
+                        conversation_id=conversation_id,
+                        user_id=user.id,
+                        error_type=exc.__class__.__name__,
+                        error_message=str(exc)[:500],
+                    )
+                investigation = None
+            if investigation is not None:
+                response = response.model_copy(update={"investigation_id": investigation.id})
         self._save_turn(
             conversation_id,
             user_id=user.id,
@@ -209,6 +323,16 @@ class ChatService:
             user_id=user.id,
             latest_user_text=latest_user_text,
             final_state=final_state,
+            response=response,
+        )
+        _log_route_trace(
+            settings=self._settings,
+            request_id=request_id,
+            conversation_id=conversation_id,
+            latest_user_text=latest_user_text,
+            prior_messages=prior_messages,
+            route=route,
+            langgraph_invoked=True,
             response=response,
         )
         return response
@@ -240,15 +364,49 @@ class ChatService:
     ) -> None:
         if not self._memory_enabled or not request_messages:
             return
-        user_message = request_messages[-1]
-        assistant_message = response.message.model_dump(mode="json")
+        latest_user = next(
+            (message for message in reversed(request_messages) if message.get("role") == ChatRole.USER.value),
+            request_messages[-1],
+        )
+        created_at = datetime.now(tz=UTC).isoformat()
+        user_message = {
+            **latest_user,
+            "metadata": {
+                "created_at": created_at,
+            },
+        }
+        assistant_metadata = {
+            "created_at": created_at,
+            "response_id": response.response_id,
+            "answer_type": response.answer_type.value,
+            "routing": response.routing.model_dump(mode="json"),
+            "intent": response.analysis.intent,
+            "tools_used": list(response.used_tools),
+            "rag_sources": [source.model_dump(mode="json") for source in response.analysis.rag_sources],
+            "provider_modes": [mode.model_dump(mode="json") for mode in response.analysis.provider_modes],
+            "data_used": list(response.analysis.data_used),
+            "limitations": list(response.analysis.limitations),
+            "orchestration_trace": dict(response.analysis.orchestration_trace),
+            "approval_id": response.decision.approval_id if response.decision is not None else None,
+            "analysis": response.analysis.model_dump(mode="json"),
+            "decision": response.decision.model_dump(mode="json") if response.decision is not None else None,
+            "investigation_id": response.investigation_id,
+        }
+        assistant_message = {
+            **response.message.model_dump(mode="json"),
+            "metadata": assistant_metadata,
+        }
         metadata = {
-            "intent": final_state.get("intent"),
+            "intent": final_state.get("intent") or response.analysis.intent,
             "recommendation": final_state.get("recommendation"),
             "used_tools": list(final_state.get("used_tools", [])),
             "decision": response.decision.model_dump(mode="json")
             if response.decision is not None
             else None,
+            "created_at": created_at,
+            "response_id": response.response_id,
+            "answer_type": response.answer_type.value,
+            "routing": response.routing.model_dump(mode="json"),
         }
         self._memory_service.save_turn(
             conversation_id,
@@ -289,6 +447,145 @@ class ChatService:
         )
 
 
+def _enforce_chat_response_contract(response: ChatResponse) -> ChatResponse:
+    """Strip investment-only fields when the route is not investment_decision."""
+    if response.answer_type == ChatAnswerType.INVESTMENT_DECISION:
+        return response
+    if response.decision is not None or response.used_tools:
+        response = response.model_copy(update={"decision": None, "used_tools": []})
+    trace = {
+        k: v
+        for k, v in response.analysis.orchestration_trace.items()
+        if k in ("routing", "domain_router", "answer_type")
+    }
+    clean_analysis = response.analysis.model_copy(
+        update={
+            "tools_used": [],
+            "provider_modes": [],
+            "rag_sources": [],
+            "evidence_items": [],
+            "data_used": [],
+            "portfolio_snapshot_used": None,
+            "policy_rules_used": [],
+            "rag_status": "not_requested",
+            "retrieval_mode": "none",
+            "approval_required": False,
+            "approval_reason": None,
+            "recommendation": Recommendation.INFORM,
+            "limitations": [],
+            "disclaimer": None,
+            "orchestration_trace": trace,
+        }
+    )
+    return response.model_copy(update={"analysis": clean_analysis})
+
+
+def _prior_messages_preview(prior: list[dict[str, Any]], *, max_items: int = 2, chars: int = 120) -> str:
+    parts: list[str] = []
+    for msg in prior[-max_items:]:
+        role = msg.get("role", "?")
+        content = str(msg.get("content", ""))[:chars].replace("\n", " ")
+        parts.append(f"{role}:{content}")
+    return " | ".join(parts) if parts else ""
+
+
+def _log_route_trace(
+    *,
+    settings: Settings,
+    request_id: str | None,
+    conversation_id: str,
+    latest_user_text: str,
+    prior_messages: list[dict[str, Any]],
+    route: ChatRouting,
+    langgraph_invoked: bool,
+    response: ChatResponse | None = None,
+) -> None:
+    if not settings.is_dev:
+        return
+    decision = response.decision if response is not None else None
+    log.info(
+        "chat_route_trace",
+        request_id=request_id or "n/a",
+        conversation_id=conversation_id,
+        latest_user_message=latest_user_text[:400],
+        prior_messages_count=len(prior_messages),
+        prior_message_preview=_prior_messages_preview(prior_messages),
+        domain_route_answer_type=route.answer_type,
+        domain_route_intent=route.intent,
+        domain_route_confidence=route.confidence,
+        domain_route_reason=(route.reason or "")[:300],
+        domain_route_suggested_tools=list(route.suggested_tools),
+        langgraph_invoked=langgraph_invoked,
+        decision_created=decision is not None,
+        approval_id_created=decision.approval_id if decision is not None else None,
+        final_answer_preview=(response.analysis.final_answer[:280] if response is not None else ""),
+        response_answer_type=(response.answer_type.value if response is not None else ""),
+    )
+
+
+def _build_gated_response(
+    *,
+    conversation_id: str,
+    latest_user_text: str,
+    routing: ChatRouting,
+    response_language: str,
+    detected_language: str | None,
+) -> ChatResponse:
+    response_id = f"msg_{uuid.uuid4().hex[:12]}"
+    try:
+        answer_type = ChatAnswerType(routing.answer_type)
+    except ValueError:
+        answer_type = ChatAnswerType.CLARIFICATION
+    if answer_type == ChatAnswerType.APP_HELP:
+        body = compose_app_help_reply(latest_user_text, response_language)
+        intent_label = "app_help"
+    elif answer_type == ChatAnswerType.OUT_OF_SCOPE:
+        body = out_of_scope_reply(response_language)
+        intent_label = "out_of_scope"
+    else:
+        body = clarification_reply(response_language)
+        answer_type = ChatAnswerType.CLARIFICATION
+        intent_label = "clarification"
+    analysis = ChatAnalysis(
+        intent=intent_label,
+        final_answer=body,
+        recommendation=Recommendation.INFORM,
+        confidence=float(routing.confidence),
+        approval_required=False,
+        approval_reason=None,
+        tools_used=[],
+        provider_modes=[],
+        evidence_items=[],
+        rag_sources=[],
+        rag_status="not_requested",
+        retrieval_mode="none",
+        portfolio_snapshot_used=None,
+        policy_rules_used=[],
+        data_freshness=None,
+        data_used=[],
+        limitations=[],
+        disclaimer=None,
+        orchestration_trace={
+            "answer_type": answer_type.value,
+            "domain_router": True,
+            "routing": routing.model_dump(),
+        },
+    )
+    return ChatResponse(
+        conversation_id=conversation_id,
+        response_id=response_id,
+        message=ChatMessage(role=ChatRole.ASSISTANT, content=body),
+        answer_type=answer_type,
+        routing=routing,
+        detected_language=detected_language,
+        response_language=response_language,
+        citations=[],
+        used_tools=[],
+        decision=None,
+        analysis=analysis,
+    )
+
+
 def _build_checkpointer(*, enabled: bool) -> Any | None:
     if not enabled:
         return None
@@ -300,10 +597,24 @@ def _build_checkpointer(*, enabled: bool) -> Any | None:
         return None
 
 
+def _analysis_limitations(*, rag_chunks: list[dict[str, Any]]) -> list[str]:
+    lines = [
+        LIMITATIONS_TEXT,
+        "Benchmark performance requires external provider connectivity.",
+    ]
+    if rag_chunks:
+        lines.insert(
+            1,
+            "RAG evidence reflects currently indexed internal documents only.",
+        )
+    return lines
+
+
 def _to_response(
     conversation_id: str,
     state: AgentState,
     *,
+    domain_route: ChatRouting,
     approvals_service: ApprovalsService,
     user_id: str,
 ) -> ChatResponse:
@@ -406,7 +717,7 @@ def _to_response(
             rag_chunks=rag_chunks,
             provider_modes=provider_modes,
         ),
-        limitations=[LIMITATIONS_TEXT, "Benchmark performance requires external provider connectivity."],
+        limitations=_analysis_limitations(rag_chunks=rag_chunks),
         disclaimer=DISCLAIMER_TEXT,
         orchestration_trace={
             "intent_detected": decision.intent,
@@ -420,12 +731,16 @@ def _to_response(
                 if decision.requires_approval
                 else "no approval required"
             ),
+            "routing": domain_route.model_dump(),
+            "router_suggested_tools": list(domain_route.suggested_tools),
         },
     )
     return ChatResponse(
         conversation_id=conversation_id,
         response_id=response_id,
         message=ChatMessage(role=ChatRole.ASSISTANT, content=answer),
+        answer_type=ChatAnswerType.INVESTMENT_DECISION,
+        routing=domain_route,
         detected_language=detected_language,
         response_language=response_language,
         citations=citations,
@@ -460,6 +775,7 @@ def _portfolio_impact(state: AgentState) -> float | None:
 
 def _provider_modes() -> list[ProviderMode]:
     settings = get_settings()
+    _, search_external_enabled = resolve_search_provider(settings)
     return [
         ProviderMode(
             name="OpenAI LLM",
@@ -480,9 +796,9 @@ def _provider_modes() -> list[ProviderMode]:
         ),
         ProviderMode(
             name="Web/News",
-            mode="real" if settings.search_provider == "serper" and bool(settings.serper_api_key) else "fallback",
+            mode="real" if search_external_enabled else "fallback",
             reason=None
-            if settings.search_provider == "serper" and settings.serper_api_key
+            if search_external_enabled
             else "SERPER_API_KEY not configured",
         ),
         ProviderMode(
@@ -549,4 +865,21 @@ def _rag_chunks(state: AgentState) -> list[dict[str, Any]]:
         data = ev.get("data")
         if isinstance(data, dict) and isinstance(data.get("chunks"), list):
             return [item for item in data["chunks"] if isinstance(item, dict)]
-    return []
+    rebuilt: list[dict[str, Any]] = []
+    for ev in state.get("evidence", []):
+        if ev.get("tool") != "rag_retrieve":
+            continue
+        data = ev.get("data")
+        if not isinstance(data, dict) or data.get("chunks") is not None:
+            continue
+        if not data.get("chunk_id") and not data.get("source"):
+            continue
+        rebuilt.append(
+            {
+                "chunk_id": data.get("chunk_id", ""),
+                "source": str(data.get("source", "knowledge")),
+                "score": data.get("score"),
+                "text": data.get("text") or "",
+            }
+        )
+    return rebuilt

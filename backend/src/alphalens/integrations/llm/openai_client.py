@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from alphalens.core.logging import get_logger
 from alphalens.integrations.llm.base import LLMClient, LLMError
-from alphalens.schemas.llm import DecisionSynthesis, IntentClassification
+from alphalens.schemas.llm import DecisionSynthesis, IntentClassification, RouteClassification
 
 if TYPE_CHECKING:  # pragma: no cover - import only for typing
     from openai import OpenAI
@@ -32,13 +32,36 @@ _INTENT_SYSTEM_PROMPT = (
     "that capability."
 )
 
+_ROUTER_SYSTEM_PROMPT = (
+    "You are the domain router for AlphaLens AI (portfolio / investment workflows). "
+    "Fill every schema field. answer_type rules: "
+    "investment_decision ONLY when the user requests analysis, retrieval, comparison, recommendation, "
+    "or explanation grounded in portfolios, holdings, tickers, risk, policy/mandate, RAG/internal docs, "
+    "market or news context for investments, macro in an investing frame, SEC filings, performance, "
+    "or workflow actions like buy/sell/trim/rebalance/hold/escalate. "
+    "app_help for questions about the product itself: languages, speech, capabilities, what you can do, "
+    "tools list, how AlphaLens works, how to upload, how reports/scenarios/approvals features work — "
+    "not a live portfolio approval decision. "
+    "out_of_scope for topics unrelated to investing, finance workflows, or this app (weather, recipes, sports, medical, legal advice, trivia). "
+    "clarification when the prompt is too vague and there is no clear investment subject (e.g. pronouns, 'should I do it?') "
+    "unless the user message clearly continues a concrete investment thread. "
+    "Be conservative: if unsure, prefer clarification over investment_decision. "
+    "Apply the same classification for English, French, German, and Arabic input. "
+    "suggested_tools: only when answer_type is investment_decision, choose zero or more from "
+    "rag_retrieve, web_search, market_quote, macro_snapshot, sec_filings, portfolio_analyze, risk_check "
+    "(use aliases rag_retriever→rag_retrieve, web_news→web_search). Otherwise return an empty list. "
+    "confidence must reflect certainty; use low values when ambiguous."
+)
+
 _SYNTHESIS_SYSTEM_PROMPT = (
     "You are a portfolio analyst summarising tool evidence into a concise "
     "reasoning trace for a human reviewer. Stay grounded in the evidence "
     "provided; do not invent numbers. Each reasoning bullet should be one "
-    "short sentence. The summary must be one paragraph. Optionally suggest "
-    "a small confidence adjustment in [-0.3, +0.3] if the evidence is "
-    "unusually strong or weak; otherwise leave it null."
+    "short sentence. Do not paste raw knowledge-base filenames, long "
+    "snippets, or bullet lists of sources—refer generically (e.g. internal "
+    "policy documents, portfolio snapshot). The summary must be one paragraph. "
+    "Optionally suggest a small confidence adjustment in [-0.3, +0.3] if the "
+    "evidence is unusually strong or weak; otherwise leave it null."
 )
 
 
@@ -71,6 +94,13 @@ class OpenAILLMClient(LLMClient):
             schema=IntentClassification,
             system_prompt=_INTENT_SYSTEM_PROMPT,
             user_payload={"message": message},
+        )
+
+    def classify_route(self, *, message: str) -> RouteClassification:
+        return self._parse(
+            schema=RouteClassification,
+            system_prompt=_ROUTER_SYSTEM_PROMPT,
+            user_payload={"user_message": message},
         )
 
     def synthesize_decision(

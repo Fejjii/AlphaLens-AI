@@ -20,8 +20,7 @@ def make_rag_tool(rag_service: RAGService, *, k: int = DEFAULT_K) -> Tool:
         if not chunks:
             summary = f"No knowledge-base context found for: {query!r}."
         else:
-            sources = ", ".join(sorted({c.source for c in chunks}))
-            summary = f"Retrieved {len(chunks)} chunk(s) from {sources}."
+            summary = f"Retrieved {len(chunks)} passage(s) from the internal knowledge base."
         return ToolResult(
             name="rag_retrieve",
             summary=summary,

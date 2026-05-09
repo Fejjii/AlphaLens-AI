@@ -3,12 +3,15 @@ import type {
   ApprovalDecisionPayload,
   ChatRequest,
   ChatResponse,
+  ConversationDetail,
+  ConversationSummary,
   FeedbackCreate,
   RecentFeedbackItem,
   FeedbackResponse,
   FeedbackSummary,
   HealthStatus,
   KnowledgeDocument,
+  Investigation,
   KnowledgeSearchResponse,
   KnowledgeStats,
   KnowledgeUploadResponse,
@@ -30,7 +33,6 @@ import type {
   RuntimeStatus,
 } from "@/types/api";
 import {
-  mockApprovals,
   mockPortfolio,
   mockReports,
   mockReportSummary,
@@ -39,6 +41,7 @@ import {
   mockUsageEvents,
   mockUsageSummary,
 } from "@/lib/mock";
+import { stripUndefinedDeep } from "@/lib/reportMemoPayload";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/backend";
 const DEFAULT_TIMEOUT_MS = 8000;
@@ -59,6 +62,8 @@ class ApiError extends Error {
     message: string,
     public status: number,
     public detail?: unknown,
+    /** Client-generated id (e.g. memo/report POST) when backend omits it in the body. */
+    public clientRequestId?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -69,8 +74,28 @@ function formatErrorDetail(detail: unknown): string | null {
   if (typeof detail === "string" && detail.trim()) {
     return detail;
   }
+  if (Array.isArray(detail)) {
+    const parts = detail.map((item) => {
+      if (item && typeof item === "object" && "msg" in item) {
+        const rec = item as Record<string, unknown>;
+        const loc = Array.isArray(rec.loc) ? (rec.loc as unknown[]).join(".") : "";
+        const msg = typeof rec.msg === "string" ? rec.msg : String(rec.msg ?? "");
+        return loc ? `${loc}: ${msg}` : msg;
+      }
+      return JSON.stringify(item);
+    });
+    return parts.join("; ");
+  }
   if (detail && typeof detail === "object") {
     const record = detail as Record<string, unknown>;
+    const apiCode = typeof record.code === "string" ? record.code : null;
+    const apiMessage = typeof record.message === "string" ? record.message : null;
+    if (apiCode && apiMessage?.trim()) {
+      return `${apiCode} — ${apiMessage}`;
+    }
+    if (apiMessage?.trim() && !apiCode) {
+      return apiMessage;
+    }
     const error = typeof record.error === "string" ? record.error : null;
     if (error === "quota_exceeded") {
       const plan = typeof record.plan === "string" ? record.plan : "your";
@@ -112,6 +137,60 @@ function formatErrorDetail(detail: unknown): string | null {
   return null;
 }
 
+function extractRequestIdFromDetail(detail: unknown): string | null {
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const rid = (detail as Record<string, unknown>).request_id;
+    if (typeof rid === "string" && rid.trim()) return rid;
+  }
+  return null;
+}
+
+/** User-visible message for report / memo API failures (no stack traces). */
+export function formatMemoReportError(error: unknown): string {
+  if (error instanceof ApiError) {
+    const detailText = formatErrorDetail(error.detail) ?? error.message;
+    const requestId =
+      extractRequestIdFromDetail(error.detail) ?? error.clientRequestId ?? null;
+    const ridSuffix = requestId ? ` Request id: ${requestId}.` : "";
+    if (error.status === 401) {
+      return `Memo generation failed: 401 — ${detailText}. Please sign in again.${ridSuffix}`;
+    }
+    if (error.status === 403) {
+      return `Memo generation failed: 403 — ${detailText}.${ridSuffix}`;
+    }
+    if (error.status === 422) {
+      return `Memo generation failed: 422 invalid report payload — ${detailText}${ridSuffix}`.trim();
+    }
+    if (error.status >= 500) {
+      const rec =
+        error.detail && typeof error.detail === "object" && !Array.isArray(error.detail)
+          ? (error.detail as Record<string, unknown>)
+          : null;
+      const backendCode = typeof rec?.code === "string" ? rec.code : null;
+      const backendMsg =
+        typeof rec?.message === "string" ? rec.message : null;
+      const vague =
+        /^Request failed:\s*\d+$/.test(detailText.trim()) ||
+        (backendCode === "internal_error" &&
+          (backendMsg === "An unexpected error occurred." ||
+            detailText === "internal_error — An unexpected error occurred."));
+      if (vague) {
+        return `Report service crashed. Check backend logs with request id: ${requestId ?? "n/a"}.`;
+      }
+      const line =
+        backendCode && backendMsg
+          ? `${error.status} ${backendCode} — ${backendMsg}`
+          : `${error.status} — ${detailText}`;
+      return `Memo generation failed: ${line}.${ridSuffix}`.trim();
+    }
+    return `Memo generation failed (${error.status}): ${detailText}${ridSuffix}`.trim();
+  }
+  if (error instanceof Error && error.name === "AbortError") {
+    return "Memo generation failed: request timed out or was cancelled.";
+  }
+  return "Memo generation failed: unexpected error.";
+}
+
 async function request<T>(
   path: string,
   init: RequestInit = {},
@@ -135,12 +214,14 @@ async function request<T>(
     if (!response.ok) {
       let detail: unknown;
       try {
-        const body = (await response.json()) as { detail?: unknown };
-        detail = body.detail;
+        const body = (await response.json()) as Record<string, unknown>;
+        detail = "detail" in body && body.detail !== undefined ? body.detail : body;
       } catch {
         detail = undefined;
       }
-      throw new ApiError(formatErrorDetail(detail) ?? `Request failed: ${response.status}`, response.status, detail);
+      const message =
+        formatErrorDetail(detail) ?? `Request failed: ${response.status}`;
+      throw new ApiError(message, response.status, detail);
     }
     if (process.env.NODE_ENV === "development" && path.startsWith("/approvals")) {
       // eslint-disable-next-line no-console
@@ -149,6 +230,9 @@ async function request<T>(
         method: init.method ?? "GET",
         response_status: response.status,
       });
+    }
+    if (response.status === 204) {
+      return undefined as T;
     }
     return (await response.json()) as T;
   } finally {
@@ -170,12 +254,12 @@ async function withFallback<T>(promise: Promise<T>, fallback: T): Promise<T> {
 }
 
 async function fetchApprovals(): Promise<Approval[]> {
-  return withFallback(request<Approval[]>("/approvals"), mockApprovals);
+  return request<Approval[]>("/approvals");
 }
 
 async function listApprovals(status?: Approval["status"]): Promise<Approval[]> {
   const query = status ? `?status=${encodeURIComponent(status)}` : "";
-  return withFallback(request<Approval[]>(`/approvals${query}`), mockApprovals);
+  return request<Approval[]>(`/approvals${query}`);
 }
 
 async function decideApproval(
@@ -264,12 +348,33 @@ export const api = {
     }),
   fetchRecentFeedback: () =>
     withFallback(request<RecentFeedbackItem[]>("/feedback/recent"), []),
-  createReport: (payload: ReportCreate) =>
-    request<ReportResponse>("/reports", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+  createReport: async (payload: ReportCreate) => {
+    const requestId =
+      typeof globalThis.crypto !== "undefined" && "randomUUID" in globalThis.crypto
+        ? globalThis.crypto.randomUUID()
+        : `req_${Date.now().toString(36)}`;
+    const body = JSON.stringify(stripUndefinedDeep(payload) as ReportCreate);
+    try {
+      return await request<ReportResponse>("/reports", {
+        method: "POST",
+        body,
+        headers: { "X-Request-Id": requestId },
+      });
+    } catch (err) {
+      if (err instanceof ApiError) {
+        throw new ApiError(err.message, err.status, err.detail, requestId);
+      }
+      throw err;
+    }
+  },
   fetchReports: () => withFallback(request<ReportResponse[]>("/reports"), mockReports),
+  fetchInvestigations: () => request<Investigation[]>("/investigations"),
+  fetchInvestigation: (investigationId: string) =>
+    request<Investigation>(`/investigations/${encodeURIComponent(investigationId)}`),
+  deleteInvestigation: (investigationId: string) =>
+    request<unknown>(`/investigations/${encodeURIComponent(investigationId)}`, {
+      method: "DELETE",
+    }),
   fetchReportSummary: () =>
     withFallback(request<ReportSummary>("/reports/summary"), mockReportSummary),
   createScenario: (payload: ScenarioCreate) =>
@@ -298,10 +403,29 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  chat: (payload: ChatRequest) =>
-    request<ChatResponse>("/agent/chat", {
+  chat: (payload: ChatRequest) => {
+    const requestId =
+      typeof globalThis.crypto !== "undefined" && "randomUUID" in globalThis.crypto
+        ? globalThis.crypto.randomUUID()
+        : `req_${Date.now().toString(36)}`;
+    return request<ChatResponse>("/agent/chat", {
       method: "POST",
       body: JSON.stringify(payload),
+      headers: { "X-Request-Id": requestId },
+    });
+  },
+  createConversation: (payload?: { title?: string | null }) =>
+    request<ConversationSummary>("/conversations", {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    }),
+  listConversations: (limit = 20) =>
+    request<ConversationSummary[]>(`/conversations?limit=${encodeURIComponent(String(limit))}`),
+  getConversation: (conversationId: string) =>
+    request<ConversationDetail>(`/conversations/${encodeURIComponent(conversationId)}`),
+  deleteConversation: (conversationId: string) =>
+    request<unknown>(`/conversations/${encodeURIComponent(conversationId)}`, {
+      method: "DELETE",
     }),
   transcribeAudio: async (file: File): Promise<TranscriptionApiResult> => {
     const normalizedAudioType = file.type.toLowerCase().split(";", 1)[0].trim() || file.type;

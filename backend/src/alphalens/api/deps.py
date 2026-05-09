@@ -37,6 +37,11 @@ from alphalens.repositories.feedback import (
     InMemoryFeedbackRepository,
     SqlAlchemyFeedbackRepository,
 )
+from alphalens.repositories.investigations import (
+    InMemoryInvestigationRepository,
+    InvestigationRepository,
+    SqlAlchemyInvestigationRepository,
+)
 from alphalens.repositories.reports import (
     InMemoryReportRepository,
     ReportRepository,
@@ -59,10 +64,12 @@ from alphalens.services.auth_service import (
     AuthError,
     AuthService,
     InactiveUserError,
+    TokenExpiredError,
 )
 from alphalens.services.cache_service import CacheService
 from alphalens.services.chat_service import ChatService
 from alphalens.services.feedback_service import FeedbackService
+from alphalens.services.investigations_service import InvestigationsService
 from alphalens.services.llm_service import LLMService, get_llm_service
 from alphalens.services.macro_service import MacroService, get_macro_service
 from alphalens.services.market_data_service import (
@@ -93,6 +100,7 @@ class PersistenceRuntimeState:
     refresh_tokens: Literal["postgres", "memory"]
     approvals: Literal["postgres", "memory"]
     reports: Literal["postgres", "memory"]
+    investigations: Literal["postgres", "memory"]
     feedback: Literal["postgres", "memory"]
     usage: Literal["postgres", "memory"]
 
@@ -105,6 +113,7 @@ def _memory_fallback_state(reason: str) -> PersistenceRuntimeState:
         refresh_tokens="memory",
         approvals="memory",
         reports="memory",
+        investigations="memory",
         feedback="memory",
         usage="memory",
     )
@@ -142,6 +151,7 @@ def _persistence_runtime_state() -> PersistenceRuntimeState:
         refresh_tokens="postgres",
         approvals="postgres",
         reports="postgres",
+        investigations="postgres",
         feedback="postgres",
         usage="postgres",
     )
@@ -274,12 +284,25 @@ def _report_repository() -> ReportRepository:
 
 
 @lru_cache(maxsize=1)
+def _investigation_repository() -> InvestigationRepository:
+    settings = get_settings()
+    if _persistence_runtime_state().investigations == "postgres":
+        return SqlAlchemyInvestigationRepository(get_session_factory(settings))
+    return InMemoryInvestigationRepository()
+
+
+@lru_cache(maxsize=1)
 def _reports_service() -> ReportsService:
     return ReportsService(
         repository=_report_repository(),
         usage_service=_usage_service(),
         memory_service=_memory_service(),
     )
+
+
+@lru_cache(maxsize=1)
+def _investigations_service() -> InvestigationsService:
+    return InvestigationsService(repository=_investigation_repository())
 
 
 @lru_cache(maxsize=1)
@@ -327,6 +350,7 @@ def _chat_service() -> ChatService:
         sec_service=_sec_service(),
         usage_service=_usage_service(),
         memory_service=_memory_service(),
+        investigations_service=_investigations_service(),
     )
 
 
@@ -372,6 +396,10 @@ def get_reports_service() -> ReportsService:
     return _reports_service()
 
 
+def get_investigations_service() -> InvestigationsService:
+    return _investigations_service()
+
+
 def get_scenarios_service() -> ScenariosService:
     return _scenarios_service()
 
@@ -394,13 +422,31 @@ def get_auth_service() -> AuthService:
     return _auth_service()
 
 
+def _auth_http_detail(
+    request: Request,
+    *,
+    error: str,
+    message: str,
+) -> dict[str, str]:
+    detail: dict[str, str] = {"error": error, "message": message}
+    header_rid = request.headers.get("x-request-id")
+    if header_rid:
+        detail["request_id"] = header_rid
+    return detail
+
+
 def get_current_user(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)],
 ) -> UserProfile:
     if credentials is None or not credentials.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication credentials were not provided.",
+            detail=_auth_http_detail(
+                request,
+                error="authentication_required",
+                message="Authentication credentials were not provided.",
+            ),
         )
     auth_service = get_auth_service()
     try:
@@ -410,10 +456,23 @@ def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(exc),
         ) from exc
+    except TokenExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=_auth_http_detail(
+                request,
+                error="token_expired",
+                message=str(exc),
+            ),
+        ) from exc
     except AuthError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(exc),
+            detail=_auth_http_detail(
+                request,
+                error="authentication_failed",
+                message=str(exc),
+            ),
         ) from exc
 
 
@@ -426,6 +485,7 @@ MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service_dep)]
 SpeechServiceDep = Annotated[SpeechService, Depends(get_speech_service)]
 FeedbackServiceDep = Annotated[FeedbackService, Depends(get_feedback_service)]
 ReportsServiceDep = Annotated[ReportsService, Depends(get_reports_service)]
+InvestigationsServiceDep = Annotated[InvestigationsService, Depends(get_investigations_service)]
 ScenariosServiceDep = Annotated[ScenariosService, Depends(get_scenarios_service)]
 PlanServiceDep = Annotated[PlanService, Depends(get_plan_service)]
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]

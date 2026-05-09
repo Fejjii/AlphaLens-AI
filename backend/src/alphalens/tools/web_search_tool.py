@@ -64,6 +64,8 @@ def _response_to_result(
         summary=summary,
         data={
             "provider": response.provider,
+            "fallback_used": response.fallback_used,
+            "provider_source": response.provider_source,
             "query": response.query,
             "results": [_result_to_dict(r) for r in response.results],
         },

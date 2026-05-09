@@ -193,11 +193,28 @@ export default function ReportsPage() {
 
                     {expanded && (
                       <div className="space-y-3 rounded-[0.875rem] border border-border/60 bg-card/60 p-3">
+                        {report.memo_metadata?.limited_context ? (
+                          <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100">
+                            Limited context memo: some market or portfolio fields were unavailable.
+                          </div>
+                        ) : null}
                         {report.disclaimer && (
                           <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100">
                             {report.disclaimer}
                           </div>
                         )}
+                        <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                          <Badge variant="outline">Source: {report.source_response_id ? "Agent decision" : "Manual"}</Badge>
+                          <Badge variant="outline">
+                            Approval: {report.memo_metadata?.approval_id ?? "none"}
+                          </Badge>
+                          <Badge variant="outline">
+                            Evidence: {report.evidence_count ?? report.evidence.length}
+                          </Badge>
+                          <Badge variant="outline">
+                            RAG sources: {report.memo_metadata?.rag_sources_count ?? 0}
+                          </Badge>
+                        </div>
                         {report.approval_required_reason && (
                           <div className="text-xs text-muted-foreground">
                             Approval reason: {report.approval_required_reason}

@@ -111,6 +111,16 @@ export const mockApprovals: Approval[] = [
 export const mockChatResponse: ChatResponse = {
   conversation_id: "conv_demo",
   response_id: "msg_demo",
+  answer_type: "app_help",
+  routing: {
+    answer_type: "app_help",
+    intent: "app_capability",
+    confidence: 1,
+    language: "en",
+    reason: "mock",
+    suggested_tools: [],
+    router_source: "mock",
+  },
   message: {
     role: "assistant",
     content:
@@ -215,6 +225,19 @@ export const mockReports: ReportResponse[] = [
     ],
     evidence: [],
     citations: ["market_data", "risk"],
+    disclaimer: "Demo disclaimer",
+    limitations: ["Demo limitation"],
+    evidence_count: 0,
+    policy_flags: [],
+    approval_required_reason: null,
+    memo_metadata: {
+      limited_context: true,
+      rag_sources_count: 0,
+      tools_used: [],
+      fallback_used: true,
+      generated_sections: ["executive_summary"],
+      approval_id: null,
+    },
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
